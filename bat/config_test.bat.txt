@@ -1,3 +1,0 @@
-BatchFileName
-BatchFilePath
-line
