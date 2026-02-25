@@ -6,4 +6,9 @@ comp
 deleted
 modified
 new
+<<<<<<< HEAD
 ./target/*
+=======
+target
+xml
+>>>>>>> 856aaa05ca261f1d24738f317f16f978eb076d1f

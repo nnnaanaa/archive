@@ -35,7 +35,7 @@ if __name__ == "__main__":
     
     print(f"\n{target_folder} 内の大きいファイルを検索中...\n")
     
-    top_files = get_large_files(target_folder, top_n=10)
+    top_files = get_large_files(target_folder, top_n=20)
 
     print(f"--- サイズが大きいファイル TOP 10 ---")
     for i, (path, size) in enumerate(top_files, 1):
