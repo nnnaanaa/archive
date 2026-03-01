@@ -1,6 +1,6 @@
 """
-Lavender-themed folder launcher
-Manage folders organized by category tabs
+Gem — ラベンダー調マルチハブ
+フォルダ管理・ターミナル接続・タスク管理をまとめて扱う
 """
 
 import tkinter as tk
@@ -18,9 +18,8 @@ from ctypes import wintypes
 from pathlib import Path
 from PIL import ImageGrab
 
-CONFIG_FILE   = Path(__file__).parent / "folders.json"
-TERM_CONFIG   = Path(__file__).parent / "terminals.json"
-TASKS_CONFIG  = Path(__file__).parent / "tasks.json"
+CONFIG_FILE   = Path(__file__).parent / "config.json"
+LOG_DIR       = Path(__file__).parent / "logs"
 TERATERM_LINK = r"C:\Users\nanahira\Desktop\Tera Term 5.lnk"
 
 C = {
@@ -129,7 +128,7 @@ def _decode_pw(enc: str) -> str:
 
 
 def _launch_teraterm(conn: dict):
-    """Launch Tera Term with auto-login and command execution."""
+    """Launch Tera Term with auto-login, command execution and auto-logging."""
     exe   = _get_teraterm_exe()
     host  = conn["host"]
     port  = int(conn.get("port", 22 if conn["protocol"] == "SSH" else 23))
@@ -138,12 +137,18 @@ def _launch_teraterm(conn: dict):
     proto = conn["protocol"]
     cmds  = [c for c in conn.get("commands", []) if c.strip()]
 
+    # ログファイルを自動生成
+    LOG_DIR.mkdir(exist_ok=True)
+    timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+    log_path = LOG_DIR / f"{timestamp}_{host}.log"
+    log_arg = [f"/L={log_path}"]
+
     PROMPT = "wait '$' '#' '%' '>'"
 
     if cmds:
-        # if commands exist, use TTL script to wait for prompt and send them
+        # コマンドがある場合はTTLスクリプトでプロンプト待機 + コマンド送信
         ttl_lines = [
-            "timeout = 30",  # prompt wait timeout (seconds)
+            "timeout = 30",  # プロンプト待機タイムアウト（秒）
             PROMPT,
         ]
         for cmd in cmds:
@@ -153,11 +158,11 @@ def _launch_teraterm(conn: dict):
                                          delete=False, encoding="utf-8") as f:
             f.write("\n".join(ttl_lines) + "\n")
             ttl_path = f.name
-        ttl_arg = [f"/M={ttl_path}"]  # /L= is log file, /M= is macro file
+        ttl_arg = [f"/M={ttl_path}"]
     else:
         ttl_arg = []
 
-    # pass connection info directly via CLI args (more reliable than TTL connect)
+    # 接続情報をCLI引数で渡す
     if proto == "SSH":
         args = [
             exe,
@@ -166,7 +171,7 @@ def _launch_teraterm(conn: dict):
             "/auth=password",
             f"/user={user}",
             f"/passwd={pw}",
-        ] + ttl_arg
+        ] + log_arg + ttl_arg
     else:  # Telnet
         args = [
             exe,
@@ -174,7 +179,7 @@ def _launch_teraterm(conn: dict):
             "/telnet",
             f"/user={user}",
             f"/passwd={pw}",
-        ] + ttl_arg
+        ] + log_arg + ttl_arg
 
     subprocess.Popen(args)
 
@@ -195,6 +200,22 @@ def _launch_rdp(conn: dict):
     # launch mstsc (include port in address)
     address = f"{host}:{port}" if port != 3389 else host
     subprocess.Popen(["mstsc", f"/v:{address}"])
+
+
+def _launch_smb(conn: dict):
+    """Open Windows SMB share (UNC path) in Explorer."""
+    unc  = conn["host"]   # \\server\share 形式
+    user = conn.get("user", "")
+    pw   = _decode_pw(conn.get("password", ""))
+
+    if user and pw:
+        # 資格情報を一時登録してからアクセス
+        subprocess.run(
+            ["net", "use", unc, pw, f"/user:{user}"],
+            creationflags=subprocess.CREATE_NO_WINDOW,
+            capture_output=True,
+        )
+    os.startfile(unc)
 
 
 class ConnectionDialog(tk.Toplevel):
@@ -228,14 +249,14 @@ class ConnectionDialog(tk.Toplevel):
 
     def _row(self, label: str, row: int, var: tk.StringVar,
              show: str = "", width: int = 22):
-        tk.Label(self._form, text=label, bg=C["bg"], fg=C["text_sub"],
-                 font=FONT_SMALL, anchor="e", width=10).grid(
-                     row=row, column=0, padx=(12, 4), pady=3, sticky="e")
+        lbl = tk.Label(self._form, text=label, bg=C["bg"], fg=C["text_sub"],
+                       font=FONT_SMALL, anchor="e", width=10)
+        lbl.grid(row=row, column=0, padx=(12, 4), pady=3, sticky="e")
         e = tk.Entry(self._form, textvariable=var, font=FONT,
                      bg="#F0EBF8", fg=C["text"], relief="flat", bd=1,
                      insertbackground=C["accent"], width=width, show=show)
         e.grid(row=row, column=1, padx=(0, 12), pady=3, sticky="ew")
-        return e
+        return lbl, e
 
     def _build(self):
         self._form = tk.Frame(self, bg=C["bg"])
@@ -247,19 +268,19 @@ class ConnectionDialog(tk.Toplevel):
                  font=FONT_SMALL, anchor="e", width=10).grid(
                      row=1, column=0, padx=(12, 4), pady=3, sticky="e")
         combo = ttk.Combobox(self._form, textvariable=self._proto,
-                             values=["SSH", "Telnet", "RDP"], state="readonly",
+                             values=["SSH", "Telnet", "RDP", "SMB"], state="readonly",
                              font=FONT, width=20)
         combo.grid(row=1, column=1, padx=(0, 12), pady=3, sticky="ew")
 
-        self._row("Host",     2, self._host)
-        self._port_entry = self._row("Port", 3, self._port, width=8)
+        self._host_lbl, _ = self._row("Host",     2, self._host)
+        self._port_lbl, self._port_entry = self._row("Port", 3, self._port, width=8)
         self._row("Username", 4, self._user)
         self._row("Password", 5, self._pw, show="●")
 
         # command input area
-        tk.Label(self._form, text="Commands", bg=C["bg"], fg=C["text_sub"],
-                 font=FONT_SMALL, anchor="ne", width=10).grid(
-                     row=6, column=0, padx=(12, 4), pady=(6, 3), sticky="ne")
+        self._cmd_lbl = tk.Label(self._form, text="Commands", bg=C["bg"], fg=C["text_sub"],
+                                 font=FONT_SMALL, anchor="ne", width=10)
+        self._cmd_lbl.grid(row=6, column=0, padx=(12, 4), pady=(6, 3), sticky="ne")
         self._cmd_text = tk.Text(
             self._form, font=("Consolas", 9),
             bg="#F0EBF8", fg=C["text"], relief="flat", bd=1,
@@ -269,10 +290,10 @@ class ConnectionDialog(tk.Toplevel):
         )
         self._cmd_text.insert("1.0", self._init_cmds)
         self._cmd_text.grid(row=6, column=1, padx=(0, 12), pady=(6, 3), sticky="ew")
-        tk.Label(self._form, text="One command per line\nExecuted after login",
-                 bg=C["bg"], fg=C["text_sub"],
-                 font=("Segoe UI", 7), justify="left").grid(
-                     row=7, column=1, padx=(0, 12), sticky="w")
+        self._cmd_hint = tk.Label(self._form, text="One command per line\nExecuted after login",
+                                  bg=C["bg"], fg=C["text_sub"],
+                                  font=("Segoe UI", 7), justify="left")
+        self._cmd_hint.grid(row=7, column=1, padx=(0, 12), sticky="w")
 
         btn_frame = tk.Frame(self, bg=C["bg"])
         btn_frame.pack(fill="x", padx=16, pady=(4, 14))
@@ -288,23 +309,35 @@ class ConnectionDialog(tk.Toplevel):
                   ).pack(side="right")
 
     def _on_proto_change(self, *_):
+        proto = self._proto.get()
         defaults = {"SSH": "22", "Telnet": "23", "RDP": "3389"}
-        default = defaults.get(self._proto.get(), "22")
-        if self._port.get() in ("22", "23", "3389"):
-            self._port.set(default)
+        if proto in defaults and self._port.get() in ("22", "23", "3389"):
+            self._port.set(defaults[proto])
+        is_smb = (proto == "SMB")
+        for w in (self._port_lbl, self._port_entry,
+                  self._cmd_lbl, self._cmd_text, self._cmd_hint):
+            if is_smb:
+                w.grid_remove()
+            else:
+                w.grid()
+        self._host_lbl.configure(text="UNC Path" if is_smb else "Host")
 
     def _ok(self):
         if not self._name_var.get().strip() or not self._host.get().strip():
             messagebox.showwarning("Input Error",
                                    "Name and Host are required.", parent=self)
             return
-        cmds = [l.strip() for l in self._cmd_text.get("1.0", "end").splitlines()
-                if l.strip()]
+        proto = self._proto.get()
+        cmds = [] if proto == "SMB" else [
+            l.strip() for l in self._cmd_text.get("1.0", "end").splitlines()
+            if l.strip()
+        ]
+        port_str = self._port.get().strip()
         self.result = {
             "name":     self._name_var.get().strip(),
-            "protocol": self._proto.get(),
+            "protocol": proto,
             "host":     self._host.get().strip(),
-            "port":     int(self._port.get() or 22),
+            "port":     int(port_str) if port_str else 0,
             "user":     self._user.get().strip(),
             "password": _encode_pw(self._pw.get()),
             "commands": cmds,
@@ -317,13 +350,15 @@ class ConnectionDialog(tk.Toplevel):
 class TaskDialog(tk.Toplevel):
     """Dialog for adding/editing tasks."""
 
-    def __init__(self, parent, initial: dict | None = None):
+    def __init__(self, parent, initial: dict | None = None,
+                 event_names: list | None = None):
         super().__init__(parent)
         self.title("Add Task" if initial is None else "Edit Task")
         self.configure(bg=C["bg"])
         self.resizable(False, False)
         self.grab_set()
         self.result: dict | None = None
+        self._event_names = event_names or []
 
         d = initial or {}
         self._event_var    = tk.StringVar(value=d.get("event", ""))
@@ -353,7 +388,21 @@ class TaskDialog(tk.Toplevel):
         self._form = tk.Frame(self, bg=C["bg"])
         self._form.pack(padx=4, pady=(12, 4))
 
-        self._entry_row("Event",   0, self._event_var)
+        # Event: コンボボックス（既存イベント名から選択 or 直接入力）
+        tk.Label(self._form, text="Event", bg=C["bg"], fg=C["text_sub"],
+                 font=FONT_SMALL, anchor="e", width=9).grid(
+                     row=0, column=0, padx=(12, 4), pady=3, sticky="e")
+        style = ttk.Style()
+        style.configure("Task.TCombobox",
+                        fieldbackground="#F0EBF8", background=C["accent_lt"],
+                        foreground=C["text"], arrowcolor=C["accent"])
+        self._event_cb = ttk.Combobox(
+            self._form, textvariable=self._event_var,
+            values=self._event_names, font=FONT, width=22,
+            style="Task.TCombobox",
+        )
+        self._event_cb.grid(row=0, column=1, padx=(0, 12), pady=3, sticky="ew")
+
         self._entry_row("Process", 1, self._process_var)
 
         # content (multi-line)
@@ -629,93 +678,113 @@ class FolderLauncher(tk.Tk):
 
     def __init__(self):
         super().__init__()
-        self.title("Folder Launcher")
-        self.geometry("480x480")
+        self.title("Gem")
+        self.geometry("480x400")
         self.resizable(True, True)
         self.configure(bg=C["bg"])
-        self.minsize(320, 300)
+        self.minsize(320, 260)
 
         self._icon = tk.PhotoImage(data=_make_icon_png())
         self.wm_iconphoto(True, self._icon)
 
-        # folder data: [{"category": "name", "folders": [{"name":..,"path":..}]}, ...]
+        # 全設定を config.json から一括読み込み
         self._data: list[dict] = []
-        self._active: int = 0   # -1 = Terminal tab
-        self._load()
-
-        # terminal connection data
         self._conns: list[dict] = []
-        self._load_conns()
-
-        # task data
         self._tasks: list[dict] = []
-        self._load_tasks()
+        self._active: int = 0   # -1 = Terminal tab
+        self._load_config()
         self._task_sort: dict = {"col": None, "reverse": False}
+        self._conn_sort: dict = {"col": None, "reverse": False}
+        self._conn_search = tk.StringVar()
+        self._conn_search.trace_add(
+            "write",
+            lambda *_: self._render_list() if self._active == -1 else None,
+        )
 
         self._build_ui()
         self._render_tabs()
         self._render_list()
 
-    # ── Folder config read/write ──────────────────────────
+    # ── 設定読み書き（config.json に統合）─────────────────
 
-    def _load(self):
+    def _load_config(self):
+        migrated = False
         if not CONFIG_FILE.exists():
-            self._data = [{"category": "General", "folders": []}]
-            return
-        try:
-            raw = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-            # convert old format (flat folder list)
-            if raw and isinstance(raw[0], (str, dict)) and "category" not in raw[0]:
-                folders = []
-                for item in raw:
-                    if isinstance(item, str):
-                        folders.append({"name": os.path.basename(item) or item, "path": item})
-                    else:
-                        folders.append(item)
-                self._data = [{"category": "General", "folders": folders}]
-            else:
-                self._data = raw
-        except Exception:
-            self._data = [{"category": "General", "folders": []}]
+            # 旧形式の個別ファイルがあれば自動マイグレーション
+            old_folders   = Path(__file__).parent / "folders.json"
+            old_terminals = Path(__file__).parent / "terminals.json"
+            old_tasks     = Path(__file__).parent / "tasks.json"
+            cfg = {}
+            if old_folders.exists():
+                try:
+                    cfg["folders"] = json.loads(old_folders.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+            if old_terminals.exists():
+                try:
+                    cfg["terminals"] = json.loads(old_terminals.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+            if old_tasks.exists():
+                try:
+                    cfg["tasks"] = json.loads(old_tasks.read_text(encoding="utf-8"))
+                except Exception:
+                    pass
+            if not cfg:
+                self._data = [{"category": "General", "folders": []}]
+                return
+            migrated = True  # マイグレーション成功
+        else:
+            try:
+                cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            except Exception:
+                cfg = {}
+
+        # フォルダ設定（旧形式の自動変換）
+        raw = cfg.get("folders", [])
+        if raw and isinstance(raw[0], (str, dict)) and "category" not in raw[0]:
+            folders = []
+            for item in raw:
+                if isinstance(item, str):
+                    folders.append({"name": os.path.basename(item) or item, "path": item})
+                else:
+                    folders.append(item)
+            self._data = [{"category": "General", "folders": folders}]
+        else:
+            self._data = raw or [{"category": "General", "folders": []}]
 
         if not self._data:
             self._data = [{"category": "General", "folders": []}]
 
-    def _save(self):
+        # ターミナル接続設定
+        self._conns = cfg.get("terminals", [])
+
+        # タスクデータ
+        self._tasks = cfg.get("tasks", [])
+
+        # 旧ファイルからのマイグレーション時は config.json に保存
+        if migrated:
+            self._save_config()
+
+    def _save_config(self):
+        cfg = {
+            "folders": self._data,
+            "terminals": self._conns,
+            "tasks": self._tasks,
+        }
         CONFIG_FILE.write_text(
-            json.dumps(self._data, ensure_ascii=False, indent=2),
+            json.dumps(cfg, ensure_ascii=False, indent=2),
             encoding="utf-8",
         )
 
-    # ── Terminal connection config read/write ─────────────
-
-    def _load_conns(self):
-        if TERM_CONFIG.exists():
-            try:
-                self._conns = json.loads(TERM_CONFIG.read_text(encoding="utf-8"))
-            except Exception:
-                self._conns = []
+    def _save(self):
+        self._save_config()
 
     def _save_conns(self):
-        TERM_CONFIG.write_text(
-            json.dumps(self._conns, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
-
-    # ── Task data read/write ───────────────────────────────
-
-    def _load_tasks(self):
-        if TASKS_CONFIG.exists():
-            try:
-                self._tasks = json.loads(TASKS_CONFIG.read_text(encoding="utf-8"))
-            except Exception:
-                self._tasks = []
+        self._save_config()
 
     def _save_tasks(self):
-        TASKS_CONFIG.write_text(
-            json.dumps(self._tasks, ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self._save_config()
 
     @property
     def _current(self) -> dict:
@@ -725,17 +794,17 @@ class FolderLauncher(tk.Tk):
 
     def _build_ui(self):
         # header
-        hdr = tk.Frame(self, bg=C["accent"], height=36)
+        hdr = tk.Frame(self, bg=C["accent"], height=30)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
-        tk.Label(hdr, text="Folder Launcher",
+        tk.Label(hdr, text="Gem",
                  bg=C["accent"], fg="white", font=FONT_BOLD,
-                 ).pack(side="left", padx=12, pady=6)
+                 ).pack(side="left", padx=8, pady=4)
 
         self._clock_var = tk.StringVar()
         tk.Label(hdr, textvariable=self._clock_var,
                  bg=C["accent"], fg=C["accent_lt"],
-                 font=("Consolas", 9)).pack(side="left", padx=8)
+                 font=("Consolas", 9)).pack(side="left", padx=6)
         self._tick()
 
         tk.Button(hdr, text="Screenshot",
@@ -743,7 +812,7 @@ class FolderLauncher(tk.Tk):
                   bg=C["accent_dk"], fg="white", relief="flat", bd=0,
                   font=FONT, cursor="hand2",
                   activebackground=C["accent_lt"], activeforeground=C["text"],
-                  padx=10, pady=2).pack(side="right", padx=(0, 8))
+                  padx=8, pady=1).pack(side="right", padx=(0, 6))
 
         self._show_options = tk.BooleanVar(value=False)
         tk.Checkbutton(hdr, text="Options",
@@ -752,7 +821,7 @@ class FolderLauncher(tk.Tk):
                        activebackground=C["accent"], activeforeground="white",
                        selectcolor=C["accent_dk"],
                        relief="flat", bd=0, font=FONT_SMALL,
-                       ).pack(side="right", padx=(0, 4))
+                       ).pack(side="right", padx=(0, 2))
 
         # tab bar
         self._tab_bar = tk.Frame(self, bg=C["tab_inact"])
@@ -760,7 +829,7 @@ class FolderLauncher(tk.Tk):
 
         # scrollable list
         wrapper = tk.Frame(self, bg=C["bg"])
-        wrapper.pack(fill="both", expand=True, padx=8, pady=6)
+        wrapper.pack(fill="both", expand=True, padx=4, pady=3)
 
         canvas = tk.Canvas(wrapper, bg=C["bg"], highlightthickness=0)
         scrollbar = tk.Scrollbar(wrapper, orient="vertical", command=canvas.yview)
@@ -781,13 +850,13 @@ class FolderLauncher(tk.Tk):
         self._canvas = canvas
 
         # footer (buttons are reused on tab switch)
-        footer = tk.Frame(self, bg=C["bg"], pady=6)
-        footer.pack(fill="x", padx=8)
+        footer = tk.Frame(self, bg=C["bg"], pady=3)
+        footer.pack(fill="x", padx=4)
         self._footer_btn = tk.Button(
             footer, text="+ Add Folder",
             command=self._add_folder,
             bg=C["accent"], fg="white", relief="flat", bd=0,
-            font=FONT_BOLD, cursor="hand2", padx=12, pady=6,
+            font=FONT_BOLD, cursor="hand2", padx=12, pady=4,
             activebackground=C["accent_dk"], activeforeground="white",
         )
         self._footer_btn.pack(fill="x")
@@ -810,7 +879,7 @@ class FolderLauncher(tk.Tk):
                 fg=C["text"] if is_active else C["text_sub"],
                 relief="flat", bd=0,
                 font=FONT_BOLD if is_active else FONT,
-                cursor="hand2", padx=10, pady=5,
+                cursor="hand2", padx=10, pady=3,
                 activebackground=C["tab_act"],
                 activeforeground=C["text"],
             )
@@ -824,7 +893,7 @@ class FolderLauncher(tk.Tk):
             command=self._add_category,
             bg=C["tab_inact"], fg=C["text_sub"],
             relief="flat", bd=0,
-            font=FONT, cursor="hand2", padx=4, pady=5,
+            font=FONT, cursor="hand2", padx=4, pady=3,
             activebackground=C["accent_lt"],
             activeforeground=C["text"],
         ).pack(side="left", padx=(2, 0))
@@ -950,7 +1019,7 @@ class FolderLauncher(tk.Tk):
                 text="No folders registered.\nClick \"+ Add Folder\" to add one.",
                 bg=C["bg"], fg=C["text_sub"],
                 font=FONT_SMALL, justify="center",
-            ).pack(pady=30)
+            ).pack(pady=20)
             return
 
         for i, entry in enumerate(folders):
@@ -958,9 +1027,9 @@ class FolderLauncher(tk.Tk):
 
     def _make_card(self, idx: int, name: str, path: str):
         card = tk.Frame(self._list_frame, bg=C["card"],
-                        pady=6, padx=10, relief="flat", bd=0,
+                        pady=4, padx=8, relief="flat", bd=0,
                         highlightthickness=1, highlightbackground=C["border"])
-        card.pack(fill="x", pady=3, padx=2)
+        card.pack(fill="x", pady=2, padx=2)
 
         left = tk.Frame(card, bg=C["card"])
         left.pack(side="left", fill="both", expand=True)
@@ -1033,35 +1102,145 @@ class FolderLauncher(tk.Tk):
     # ── Terminal list ─────────────────────────────────────
 
     def _render_terminal_list(self):
-        if not self._conns:
-            tk.Label(
-                self._list_frame,
-                text="No connections registered.\nClick \"+ Add Connection\".",
-                bg=C["bg"], fg=C["text_sub"],
-                font=FONT_SMALL, justify="center",
-            ).pack(pady=30)
+        # ── ツールバー（検索・ソート）──────────────────────
+        toolbar = tk.Frame(self._list_frame, bg=C["bg"])
+        toolbar.pack(fill="x", pady=(0, 4))
+
+        tk.Label(toolbar, text="🔍", bg=C["bg"], fg=C["text_sub"],
+                 font=FONT_SMALL).pack(side="left", padx=(2, 2))
+        tk.Entry(toolbar, textvariable=self._conn_search,
+                 font=FONT, bg="#F0EBF8", fg=C["text"],
+                 relief="flat", bd=1, insertbackground=C["accent"],
+                 ).pack(side="left", fill="x", expand=True)
+
+        def _sort_cmd(key: str):
+            if self._conn_sort["col"] == key:
+                self._conn_sort["reverse"] = not self._conn_sort["reverse"]
+            else:
+                self._conn_sort["col"] = key
+                self._conn_sort["reverse"] = False
+            self._render_list()
+
+        def _hdr(key: str, label: str) -> str:
+            if self._conn_sort["col"] == key:
+                return label + (" ▼" if self._conn_sort["reverse"] else " ▲")
+            return label
+
+        sort_frame = tk.Frame(toolbar, bg=C["bg"])
+        sort_frame.pack(side="right", padx=(4, 0))
+        for key, label in [("name", "Name"), ("protocol", "Proto"), ("host", "Host")]:
+            b = tk.Button(sort_frame, text=_hdr(key, label),
+                          command=lambda k=key: _sort_cmd(k),
+                          bg=C["tab_inact"], fg=C["text_sub"],
+                          relief="flat", bd=0, font=FONT_SMALL,
+                          cursor="hand2", padx=6, pady=2,
+                          activebackground=C["card_h"],
+                          activeforeground=C["text"])
+            b.pack(side="left", padx=1)
+            _hover(b, C["card_h"], C["tab_inact"])
+
+        # ── フィルタリング & ソート ──────────────────────
+        query = self._conn_search.get().lower()
+        conns_idx = [
+            (i, c) for i, c in enumerate(self._conns)
+            if not query
+            or query in c["name"].lower()
+            or query in c["host"].lower()
+            or query in c["protocol"].lower()
+        ]
+        col = self._conn_sort["col"]
+        rev = self._conn_sort["reverse"]
+        if col == "name":
+            conns_idx.sort(key=lambda x: x[1]["name"].lower(), reverse=rev)
+        elif col == "protocol":
+            conns_idx.sort(key=lambda x: x[1]["protocol"].lower(), reverse=rev)
+        elif col == "host":
+            conns_idx.sort(key=lambda x: x[1]["host"].lower(), reverse=rev)
+
+        if not conns_idx:
+            msg = ("No connections match." if query
+                   else "No connections registered.\nClick \"+ Add Connection\".")
+            tk.Label(self._list_frame, text=msg,
+                     bg=C["bg"], fg=C["text_sub"],
+                     font=FONT_SMALL, justify="center").pack(pady=20)
             return
 
-        for i, conn in enumerate(self._conns):
+        for i, conn in conns_idx:
             self._make_conn_card(i, conn)
+
+        # ── ドラッグ&ドロップ（ソート・検索なし時のみ有効）──
+        if col is not None or query:
+            return
+        cards = [w for w in self._list_frame.winfo_children()
+                 if isinstance(w, tk.Frame) and w is not toolbar]
+        dnd: dict = {"src": None, "moved": False}
+
+        def _cards_now():
+            return [w for w in self._list_frame.winfo_children()
+                    if isinstance(w, tk.Frame) and w is not toolbar]
+
+        def on_press(e, card):
+            dnd["src"]   = card
+            dnd["moved"] = False
+
+        def on_motion(e, card):
+            src = dnd["src"]
+            if src is None or src is card:
+                return
+            cur = _cards_now()
+            try:
+                si, ti = cur.index(src), cur.index(card)
+            except ValueError:
+                return
+            if si == ti:
+                return
+            mid = card.winfo_rooty() + card.winfo_height() // 2
+            insert_at = ti if e.y_root < mid else ti + 1
+            cur.pop(si)
+            cur.insert(min(insert_at, len(cur)), src)
+            for w in cur:
+                w.pack_forget()
+            for w in cur:
+                w.pack(fill="x", pady=2, padx=2)
+            dnd["moved"] = True
+
+        def on_release(_e):
+            if dnd["moved"]:
+                new_order = [w._conn_orig_idx for w in _cards_now()
+                             if hasattr(w, "_conn_orig_idx")]
+                self._conns[:] = [self._conns[i] for i in new_order]
+                self._save_conns()
+            dnd["src"]   = None
+            dnd["moved"] = False
+
+        for card_w in cards:
+            for w in (card_w, *card_w.winfo_children()):
+                w.bind("<ButtonPress-1>",   lambda e, c=card_w: on_press(e, c))
+                w.bind("<B1-Motion>",       lambda e, c=card_w: on_motion(e, c))
+                w.bind("<ButtonRelease-1>", on_release)
 
     def _make_conn_card(self, idx: int, conn: dict):
         card = tk.Frame(self._list_frame, bg=C["card"],
-                        pady=6, padx=10, relief="flat", bd=0,
+                        pady=4, padx=8, relief="flat", bd=0,
                         highlightthickness=1, highlightbackground=C["border"])
-        card.pack(fill="x", pady=3, padx=2)
+        card._conn_orig_idx = idx   # ドラッグ&ドロップ用に元インデックスを保持
+        card.pack(fill="x", pady=2, padx=2)
 
         left = tk.Frame(card, bg=C["card"])
         left.pack(side="left", fill="both", expand=True)
 
-        proto_color = {"SSH": C["accent"], "RDP": C["accent_dk"]}.get(conn["protocol"], C["text_sub"])
+        proto_color = {"SSH": C["accent"], "RDP": C["accent_dk"],
+                       "SMB": C["text_sub"]}.get(conn["protocol"], C["text_sub"])
         tk.Label(left, text=f"  {conn['name']}",
                  bg=C["card"], fg=C["text"],
                  font=FONT_BOLD, anchor="w").pack(fill="x")
-        ncmds = len(conn.get("commands", []))
-        cmd_str = f"  {ncmds} cmd{'s' if ncmds != 1 else ''}" if ncmds else ""
-        tk.Label(left,
-                 text=f"{conn['protocol']}  {conn['user']}@{conn['host']}:{conn.get('port', 22)}{cmd_str}",
+        if conn["protocol"] == "SMB":
+            sub_text = f"SMB  {conn['host']}"
+        else:
+            ncmds = len(conn.get("commands", []))
+            cmd_str = f"  {ncmds} cmd{'s' if ncmds != 1 else ''}" if ncmds else ""
+            sub_text = f"{conn['protocol']}  {conn['user']}@{conn['host']}:{conn.get('port', 22)}{cmd_str}"
+        tk.Label(left, text=sub_text,
                  bg=C["card"], fg=proto_color,
                  font=FONT_SMALL, anchor="w").pack(fill="x")
 
@@ -1117,8 +1296,11 @@ class FolderLauncher(tk.Tk):
 
     def _connect_server(self, conn: dict):
         try:
-            if conn["protocol"] == "RDP":
+            proto = conn["protocol"]
+            if proto == "RDP":
                 _launch_rdp(conn)
+            elif proto == "SMB":
+                _launch_smb(conn)
             else:
                 _launch_teraterm(conn)
         except Exception as e:
@@ -1145,7 +1327,7 @@ class FolderLauncher(tk.Tk):
                 text="No tasks registered.\nClick \"+ Add Task\" to add one.",
                 bg=C["bg"], fg=C["text_sub"],
                 font=FONT_SMALL, justify="center",
-            ).pack(pady=30)
+            ).pack(pady=20)
             return
 
         # group by event name (preserve insertion order)
@@ -1325,18 +1507,24 @@ class FolderLauncher(tk.Tk):
             target = tree.identify_row(e.y)
             if not target or target == src:
                 return
-            # task rows only (same event group)
-            if not _is_task_row(target):
-                return
-            if tree.parent(src) != tree.parent(target):
+            src_is_task = _is_task_row(src)
+            tgt_is_task = _is_task_row(target)
+            bbox = tree.bbox(target)
+            if not bbox:
                 return
             tgt_idx = tree.index(target)
-            # insert after if mouse is in lower half of row
-            bbox = tree.bbox(target)
-            if bbox and e.y >= bbox[1] + bbox[3] // 2:
+            if e.y >= bbox[1] + bbox[3] // 2:
                 tgt_idx += 1
-            tree.move(src, tree.parent(src), tgt_idx)
-            dnd["moved"] = True
+            if src_is_task and tgt_is_task:
+                # タスク行 → 同グループ内でのみ移動
+                if tree.parent(src) != tree.parent(target):
+                    return
+                tree.move(src, tree.parent(src), tgt_idx)
+                dnd["moved"] = True
+            elif not src_is_task and not tgt_is_task:
+                # イベント行 → グループごと並び替え
+                tree.move(src, "", tgt_idx)
+                dnd["moved"] = True
 
         def on_dnd_release(e):
             src = dnd["src"]
@@ -1363,32 +1551,40 @@ class FolderLauncher(tk.Tk):
             return
         try:
             idx = int(sel[0])
+            self._edit_task(idx)
         except ValueError:
-            return  # skip event parent rows
-        self._edit_task(idx)
+            # イベント親行のダブルクリック → リネーム
+            self._rename_event(tree.item(sel[0], "text"))
 
     def _task_tree_menu(self, event, tree):
         row = tree.identify_row(event.y)
         if not row:
             return
-        try:
-            idx = int(row)
-        except ValueError:
-            return  # skip event parent rows
         tree.selection_set(row)
         menu = tk.Menu(self, tearoff=0,
                        bg=C["card"], fg=C["text"],
                        activebackground=C["card_h"], activeforeground=C["text"],
                        relief="flat", font=FONT)
-        menu.add_command(label="Edit",   command=lambda: self._edit_task(idx))
-        menu.add_separator()
-        menu.add_command(label="Delete", command=lambda: self._remove_task(idx))
+        try:
+            idx = int(row)
+            # タスク行
+            menu.add_command(label="Edit",   command=lambda: self._edit_task(idx))
+            menu.add_separator()
+            menu.add_command(label="Delete", command=lambda: self._remove_task(idx))
+        except ValueError:
+            # イベント親行
+            ev_name = tree.item(row, "text")
+            menu.add_command(label="Rename",
+                             command=lambda: self._rename_event(ev_name))
         menu.tk_popup(event.x_root, event.y_root)
 
     # ── Task operations ───────────────────────────────────
 
+    def _event_names(self) -> list:
+        return sorted(set(t["event"] for t in self._tasks if t.get("event")))
+
     def _add_task(self):
-        dlg = TaskDialog(self)
+        dlg = TaskDialog(self, event_names=self._event_names())
         if dlg.result is None:
             return
         dlg.result["updated"] = datetime.date.today().isoformat()
@@ -1397,7 +1593,8 @@ class FolderLauncher(tk.Tk):
         self._render_list()
 
     def _edit_task(self, idx: int):
-        dlg = TaskDialog(self, initial=self._tasks[idx])
+        dlg = TaskDialog(self, initial=self._tasks[idx],
+                         event_names=self._event_names())
         if dlg.result is None:
             return
         dlg.result["updated"] = datetime.date.today().isoformat()
@@ -1411,6 +1608,17 @@ class FolderLauncher(tk.Tk):
             self._tasks.pop(idx)
             self._save_tasks()
             self._render_list()
+
+    def _rename_event(self, old_name: str):
+        dlg = InputDialog(self, "Rename Event", f"New name for '{old_name}':", old_name)
+        new_name = dlg.result
+        if not new_name or new_name == old_name:
+            return
+        for task in self._tasks:
+            if task["event"] == old_name:
+                task["event"] = new_name
+        self._save_tasks()
+        self._render_list()
 
     # ── Other ─────────────────────────────────────────────
 
