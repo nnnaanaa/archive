@@ -4,7 +4,7 @@ Gem — ラベンダー調マルチハブ
 """
 
 import tkinter as tk
-from tkinter import filedialog, messagebox, ttk
+from tkinter import filedialog, messagebox, ttk, simpledialog
 import os
 import json
 import subprocess
@@ -51,23 +51,91 @@ FONT_SMALL = ("Segoe UI", 8)
 # ── Icon generation ───────────────────────────────────────
 
 def _make_icon_png() -> str:
+    """輪郭線付きカットジェム＋スパークルアイコン PNG を生成して Base64 返却する。"""
     W, H = 32, 32
-    T  = (  0,   0,   0,   0)
-    B  = (106,  91, 168, 255)
-    F  = (139, 124, 200, 255)
-    HL = (196, 184, 232, 255)
+    T   = (  0,   0,   0,   0)  # transparent
+    BDR = ( 42,  32,  88, 255)  # dark outline
+    WH  = (255, 254, 255, 255)  # shine white
+    HL  = (222, 213, 243, 255)  # highlight
+    LT  = (178, 165, 220, 255)  # light crown
+    F   = (128, 112, 190, 255)  # main
+    MD  = ( 98,  82, 155, 255)  # mid shadow
+    DK  = ( 58,  46, 108, 255)  # deep shadow
+    SP  = (215, 208, 242, 210)  # sparkle
+
+    # ジェム輪郭 {y: (x_left, x_right)} 両端含む — 32x32 をほぼ全域使用
+    ROWS = {
+         2: (13, 18),   # table
+         3: (11, 20),
+         4: (10, 21),
+         5: ( 8, 23),
+         6: ( 6, 25),
+         7: ( 5, 26),
+         8: ( 3, 28),
+         9: ( 2, 29),   # girdle
+        10: ( 2, 29),   # girdle
+        11: ( 2, 29),   # girdle
+        12: ( 3, 28),   # pavilion
+        13: ( 4, 27),
+        14: ( 6, 25),
+        15: ( 7, 24),
+        16: ( 9, 22),
+        17: (10, 21),
+        18: (11, 20),
+        19: (12, 19),
+        20: (13, 18),
+        21: (13, 18),
+        22: (14, 17),
+        23: (14, 17),
+        24: (14, 17),
+        25: (15, 16),
+        26: (15, 16),
+        27: (16, 16),   # culet
+    }
+
+    def in_gem(x, y):
+        if y not in ROWS: return False
+        lo, hi = ROWS[y]
+        return lo <= x <= hi
+
+    def is_edge(x, y):
+        if not in_gem(x, y): return False
+        return any(not in_gem(x+dx, y+dy)
+                   for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)))
+
+    # スパークル：十字型 5px（余白の 3 か所）
+    SPARKLES: set[tuple[int, int]] = set()
+    for sx, sy in ((1, 1), (30, 2), (28, 29)):
+        for ddx, ddy in ((0,0),(1,0),(-1,0),(0,1),(0,-1)):
+            SPARKLES.add((sx + ddx, sy + ddy))
+
+    # 光沢スポット（左上クラウン内部）— shine を edge より優先
+    SHINE    = {(12,3),(13,3),(11,4),(12,4),(13,4)}
+    SHINE_HL = {(14,3),(11,5),(12,5),(13,5)}
 
     def px(x, y):
-        if 4 <= y <= 8 and 2 <= x <= 12:
-            if y == 4 and (x == 2 or x == 12):
-                return T
-            return B
-        if 7 <= y <= 26 and 2 <= x <= 29:
-            if (y == 7 and x == 2) or (y == 7 and x == 29): return T
-            if (y == 26 and x == 2) or (y == 26 and x == 29): return T
-            if y == 7: return HL
-            return F
-        return T
+        if (x, y) in SPARKLES:
+            return SP
+        if not in_gem(x, y):
+            return T
+        # 光沢 → 輪郭 → ファセット の順に判定
+        if (x, y) in SHINE:    return WH
+        if (x, y) in SHINE_HL: return HL
+        if is_edge(x, y):      return BDR
+
+        dx = x - 16
+        if y <= 8:    # upper crown: 明るく
+            if dx <= -5: return LT
+            if dx >= 5:  return F
+            return HL
+        if y <= 11:   # girdle: やや暗め
+            if dx <= -4: return MD
+            if dx >= 4:  return F
+            return LT
+        # pavilion: 暗く
+        if dx <= -3: return DK
+        if dx >= 3:  return MD
+        return DK
 
     raw = b''
     for y in range(H):
@@ -86,6 +154,34 @@ def _make_icon_png() -> str:
         + chunk(b'IEND', b'')
     )
     return base64.b64encode(png).decode()
+
+
+def _setup_taskbar_icon(root: tk.Tk) -> None:
+    """AppUserModelID を設定し、ICO ファイルでタスクバーアイコンを適用する。"""
+    # Python 本体から分離して独立したタスクバーボタンにする
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Gem.Launcher.1")
+    except Exception:
+        pass
+
+    ico_path = Path(__file__).parent / "gem.ico"
+    script_mtime = Path(__file__).stat().st_mtime
+    ico_mtime    = ico_path.stat().st_mtime if ico_path.exists() else 0
+    if not ico_path.exists() or script_mtime > ico_mtime:
+        try:
+            from PIL import Image
+            png_data = base64.b64decode(_make_icon_png())
+            img = Image.open(io.BytesIO(png_data)).convert("RGBA")
+            img.save(str(ico_path), format="ICO",
+                     sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
+        except Exception:
+            pass
+
+    if ico_path.exists():
+        try:
+            root.wm_iconbitmap(str(ico_path))
+        except Exception:
+            pass
 
 
 # ── Monitor info retrieval ────────────────────────────────
@@ -145,10 +241,41 @@ def _launch_teraterm(conn: dict):
 
     PROMPT = "wait '$' '#' '%' '>'"
 
-    if cmds:
-        # コマンドがある場合はTTLスクリプトでプロンプト待機 + コマンド送信
+    if proto == "SSH":
+        # SSH: CLI引数でuser/pass渡し、コマンドがあればTTLでプロンプト待機
+        if cmds:
+            ttl_lines = [
+                "timeout = 30",
+                PROMPT,
+            ]
+            for cmd in cmds:
+                ttl_lines.append(f"sendln '{cmd}'")
+                ttl_lines.append(PROMPT)
+            with tempfile.NamedTemporaryFile(mode="w", suffix=".ttl",
+                                             delete=False, encoding="utf-8") as f:
+                f.write("\n".join(ttl_lines) + "\n")
+                ttl_path = f.name
+            ttl_arg = [f"/M={ttl_path}"]
+        else:
+            ttl_arg = []
+        args = [
+            exe,
+            f"{host}:{port}",
+            "/ssh", "/2",
+            "/auth=password",
+            f"/user={user}",
+            f"/passwd={pw}",
+        ] + charset_arg + log_arg + ttl_arg
+    else:  # Telnet: TTLスクリプトでlogin/passwordプロンプトに自動入力
         ttl_lines = [
-            "timeout = 30",  # プロンプト待機タイムアウト（秒）
+            "timeout = 30",
+            # login: または Username: プロンプト待機
+            "wait 'ogin:' 'sername:'",
+            f"sendln '{user}'",
+            # Password: プロンプト待機
+            "wait 'assword:'",
+            f"sendln '{pw}'",
+            # シェルプロンプト待機
             PROMPT,
         ]
         for cmd in cmds:
@@ -158,28 +285,11 @@ def _launch_teraterm(conn: dict):
                                          delete=False, encoding="utf-8") as f:
             f.write("\n".join(ttl_lines) + "\n")
             ttl_path = f.name
-        ttl_arg = [f"/M={ttl_path}"]
-    else:
-        ttl_arg = []
-
-    # 接続情報をCLI引数で渡す
-    if proto == "SSH":
-        args = [
-            exe,
-            f"{host}:{port}",
-            "/ssh", "/2",
-            "/auth=password",
-            f"/user={user}",
-            f"/passwd={pw}",
-        ] + charset_arg + log_arg + ttl_arg
-    else:  # Telnet
         args = [
             exe,
             f"{host}:{port}",
             "/telnet",
-            f"/user={user}",
-            f"/passwd={pw}",
-        ] + charset_arg + log_arg + ttl_arg
+        ] + charset_arg + log_arg + [f"/M={ttl_path}"]
 
     subprocess.Popen(args)
 
@@ -221,13 +331,15 @@ def _launch_smb(conn: dict):
 class ConnectionDialog(tk.Toplevel):
     """Dialog for adding/editing connections."""
 
-    def __init__(self, parent, initial: dict | None = None):
+    def __init__(self, parent, initial: dict | None = None,
+                 groups: list[str] | None = None):
         super().__init__(parent)
         self.title("Add Connection" if initial is None else "Edit Connection")
         self.configure(bg=C["bg"])
         self.resizable(False, False)
         self.grab_set()
         self.result: dict | None = None
+        self._groups = groups or []
 
         d = initial or {}
         self._name_var = tk.StringVar(value=d.get("name", ""))
@@ -237,6 +349,7 @@ class ConnectionDialog(tk.Toplevel):
         self._user    = tk.StringVar(value=d.get("user", ""))
         self._pw      = tk.StringVar(value=_decode_pw(d.get("password", "")))
         self._charset = tk.StringVar(value=d.get("charset", "UTF-8"))
+        self._group_var = tk.StringVar(value=d.get("group", ""))
         self._init_cmds = "\n".join(d.get("commands", []))
 
         self._proto.trace_add("write", self._on_proto_change)
@@ -289,10 +402,20 @@ class ConnectionDialog(tk.Toplevel):
         )
         self._charset_combo.grid(row=6, column=1, padx=(0, 12), pady=3, sticky="ew")
 
+        # グループ選択
+        tk.Label(self._form, text="Group", bg=C["bg"], fg=C["text_sub"],
+                 font=FONT_SMALL, anchor="e", width=10).grid(
+                     row=7, column=0, padx=(12, 4), pady=3, sticky="e")
+        self._group_combo = ttk.Combobox(
+            self._form, textvariable=self._group_var,
+            values=self._groups, font=FONT, width=20,
+        )
+        self._group_combo.grid(row=7, column=1, padx=(0, 12), pady=3, sticky="ew")
+
         # command input area
         self._cmd_lbl = tk.Label(self._form, text="Commands", bg=C["bg"], fg=C["text_sub"],
                                  font=FONT_SMALL, anchor="ne", width=10)
-        self._cmd_lbl.grid(row=7, column=0, padx=(12, 4), pady=(6, 3), sticky="ne")
+        self._cmd_lbl.grid(row=8, column=0, padx=(12, 4), pady=(6, 3), sticky="ne")
         self._cmd_text = tk.Text(
             self._form, font=("Consolas", 9),
             bg="#F0EBF8", fg=C["text"], relief="flat", bd=1,
@@ -301,11 +424,11 @@ class ConnectionDialog(tk.Toplevel):
             wrap="none",
         )
         self._cmd_text.insert("1.0", self._init_cmds)
-        self._cmd_text.grid(row=7, column=1, padx=(0, 12), pady=(6, 3), sticky="ew")
+        self._cmd_text.grid(row=8, column=1, padx=(0, 12), pady=(6, 3), sticky="ew")
         self._cmd_hint = tk.Label(self._form, text="One command per line\nExecuted after login",
                                   bg=C["bg"], fg=C["text_sub"],
                                   font=("Segoe UI", 7), justify="left")
-        self._cmd_hint.grid(row=8, column=1, padx=(0, 12), sticky="w")
+        self._cmd_hint.grid(row=9, column=1, padx=(0, 12), sticky="w")
 
         btn_frame = tk.Frame(self, bg=C["bg"])
         btn_frame.pack(fill="x", padx=16, pady=(4, 14))
@@ -362,6 +485,7 @@ class ConnectionDialog(tk.Toplevel):
             "password": _encode_pw(self._pw.get()),
             "commands": cmds,
             "charset":  charset,
+            "group":    self._group_var.get().strip(),
         }
         self.destroy()
 
@@ -642,7 +766,7 @@ class GanttWindow(tk.Toplevel):
 
     def _build(self):
         if not self._tasks:
-            tk.Label(self, text="タスクがありません。",
+            tk.Label(self, text="No tasks.",
                      bg=C["bg"], fg=C["text_sub"], font=FONT).pack(expand=True)
             return
 
@@ -708,7 +832,7 @@ class GanttWindow(tk.Toplevel):
         cv.create_rectangle(0, 0, cw, HDR_H, fill=C["tab_inact"], outline="")
         cv.create_rectangle(0, 0, LBL_W, HDR_H, fill=C["tab_inact"], outline="")
         cv.create_text(LBL_W // 2, HDR_H // 2,
-                       text="タスク", fill=C["text"], font=FONT_BOLD)
+                       text="Task", fill=C["text"], font=FONT_BOLD)
         cv.create_line(LBL_W, 0, LBL_W, HDR_H, fill=C["border"])
 
         # 月ラベル
@@ -1273,15 +1397,44 @@ class ScreenshotWindow(tk.Toplevel):
 
 _BG = "#FAF7FF"   # ポップアップ本体の背景（柔らかいラベンダーホワイト）
 
+
+def _get_monitor_work_area(widget: tk.Misc) -> tuple[int, int, int, int]:
+    """ウィジェットが表示されているモニタの作業領域 (left, top, right, bottom) を返す。
+    タスクバーを除いた領域。取得失敗時はプライマリモニタのサイズにフォールバック。"""
+    try:
+        class _RECT(ctypes.Structure):
+            _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
+                        ("right", ctypes.c_long), ("bottom", ctypes.c_long)]
+
+        class _MONITORINFO(ctypes.Structure):
+            _fields_ = [("cbSize", wintypes.DWORD),
+                        ("rcMonitor", _RECT), ("rcWork", _RECT),
+                        ("dwFlags", wintypes.DWORD)]
+
+        # ウィジェット中心座標でモニタを特定
+        cx = widget.winfo_rootx() + widget.winfo_width() // 2
+        cy = widget.winfo_rooty() + widget.winfo_height() // 2
+        MONITOR_DEFAULTTONEAREST = 2
+        monitor = ctypes.windll.user32.MonitorFromPoint(
+            wintypes.POINT(cx, cy), MONITOR_DEFAULTTONEAREST
+        )
+        mi = _MONITORINFO()
+        mi.cbSize = ctypes.sizeof(_MONITORINFO)
+        ctypes.windll.user32.GetMonitorInfoW(monitor, ctypes.byref(mi))
+        r = mi.rcWork
+        return r.left, r.top, r.right, r.bottom
+    except Exception:
+        return 0, 0, widget.winfo_screenwidth(), widget.winfo_screenheight()
+
 class NotificationPopup(tk.Toplevel):
     """右下フェードイン・プログレスバー付き通知ポップアップ"""
 
-    DISPLAY_MS = 8000   # 表示時間（ms）
     FADE_MS    = 350    # フェードイン/アウト時間（ms）
     FADE_STEPS = 14     # フェードのステップ数
 
-    def __init__(self, parent, task: dict):
+    def __init__(self, parent, task: dict, display_ms: int = 8000):
         super().__init__(parent)
+        self._display_ms = display_ms
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         self.attributes("-alpha", 0.0)
@@ -1396,13 +1549,12 @@ class NotificationPopup(tk.Toplevel):
                              highlightthickness=0)
         self._pb.pack(fill="x", side="bottom")
 
-        # ── 配置（右下）─────────────────────────────────────
+        # ── 配置（アプリが表示されているモニタの右下）────────────
         self.update_idletasks()
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
         w  = max(self.winfo_reqwidth(), 280)
         h  = max(self.winfo_reqheight(), 80)
-        self.geometry(f"{w}x{h}+{sw - w - 20}+{sh - h - 52}")
+        ml, mt, mr, mb = _get_monitor_work_area(parent)
+        self.geometry(f"{w}x{h}+{mr - w - 20}+{mb - h - 12}")
 
         # クリックで閉じる
         for widget in (self, inner, content, hdr, hdr_l, hdr_r):
@@ -1431,7 +1583,7 @@ class NotificationPopup(tk.Toplevel):
         if not self.winfo_exists():
             return
         elapsed = time.monotonic() - self._start - self.FADE_MS / 1000
-        frac    = max(0.0, 1.0 - elapsed / (self.DISPLAY_MS / 1000))
+        frac    = max(0.0, 1.0 - elapsed / (self._display_ms / 1000))
         pw      = max(self._pb.winfo_width(), self.winfo_width())
         self._pb.coords(self._pb_rect, 0, 0, int(pw * frac), 6)
         if frac > 0:
@@ -1735,13 +1887,15 @@ class FolderLauncher(tk.Tk):
         self.minsize(320, 260)
 
         self._icon = tk.PhotoImage(data=_make_icon_png())
-        self.wm_iconphoto(True, self._icon)
+        _setup_taskbar_icon(self)
 
         # 全設定を config.json から一括読み込み
         self._data: list[dict] = []
         self._conns: list[dict] = []
         self._tasks: list[dict] = []
         self._notify_items: list[dict] = []
+        self._terminal_groups: list[str] = []
+        self._selected_group: str | None = None   # None = All
         self._active: int = 0   # -1 = Terminal tab, -2 = Tasks, -3 = Notify
         self._load_config()
         self._task_sort: dict = {"col": None, "reverse": False}
@@ -1787,6 +1941,8 @@ class FolderLauncher(tk.Tk):
                     pass
             if not cfg:
                 self._data = [{"category": "General", "folders": []}]
+                self._banner_enabled_cfg = True
+                self._notify_display_sec_cfg = 8
                 return
             migrated = True  # マイグレーション成功
         else:
@@ -1813,6 +1969,7 @@ class FolderLauncher(tk.Tk):
 
         # ターミナル接続設定
         self._conns = cfg.get("terminals", [])
+        self._terminal_groups = cfg.get("terminal_groups", [])
 
         # タスクデータ
         self._tasks = cfg.get("tasks", [])
@@ -1822,6 +1979,7 @@ class FolderLauncher(tk.Tk):
 
         # バナー表示設定
         self._banner_enabled_cfg: bool = cfg.get("banner_enabled", True)
+        self._notify_display_sec_cfg: int = cfg.get("notify_display_sec", 8)
 
         # 旧ファイルからのマイグレーション時は config.json に保存
         if migrated:
@@ -1829,11 +1987,13 @@ class FolderLauncher(tk.Tk):
 
     def _save_config(self):
         cfg = {
-            "folders":        self._data,
-            "terminals":      self._conns,
-            "tasks":          self._tasks,
-            "notifications":  self._notify_items,
-            "banner_enabled": self._banner_enabled.get() if hasattr(self, "_banner_enabled") else True,
+            "folders":         self._data,
+            "terminals":       self._conns,
+            "terminal_groups": self._terminal_groups,
+            "tasks":           self._tasks,
+            "notifications":   self._notify_items,
+            "banner_enabled":      self._banner_enabled.get() if hasattr(self, "_banner_enabled") else True,
+            "notify_display_sec":  self._notify_display_sec.get() if hasattr(self, "_notify_display_sec") else 8,
         }
         CONFIG_FILE.write_text(
             json.dumps(cfg, ensure_ascii=False, indent=2),
@@ -1883,15 +2043,38 @@ class FolderLauncher(tk.Tk):
         # Banner トグル（_tick() より先に作成する）
         self._banner_enabled = tk.BooleanVar(value=self._banner_enabled_cfg)
         self._banner_enabled.trace_add("write", lambda *_: (self._update_banner(), self._save_config()))
+        self._notify_display_sec = tk.IntVar(value=self._notify_display_sec_cfg)
+        self._notify_display_sec.trace_add("write", lambda *_: self._save_config())
 
         self._tick()
-        tk.Checkbutton(hdr, text="Banner",
-                       variable=self._banner_enabled,
-                       bg=C["accent"], fg="white",
-                       activebackground=C["accent"], activeforeground="white",
-                       selectcolor=C["accent_dk"],
-                       relief="flat", bd=0, font=FONT_SMALL,
-                       ).pack(side="right", padx=(0, 2))
+        def _toggle_banner():
+            self._banner_enabled.set(not self._banner_enabled.get())
+            _banner_btn.configure(
+                text="Banner ✓" if self._banner_enabled.get() else "Banner",
+                bg=C["accent_dk"] if self._banner_enabled.get() else C["accent"],
+            )
+        _banner_btn = tk.Button(
+            hdr, text="Banner ✓" if self._banner_enabled_cfg else "Banner",
+            command=_toggle_banner,
+            bg=C["accent_dk"] if self._banner_enabled_cfg else C["accent"],
+            fg="white", relief="flat", bd=0, font=FONT_SMALL,
+            activebackground=C["accent_lt"], activeforeground=C["text"],
+            cursor="hand2",
+        )
+        _banner_btn.pack(side="right", padx=(0, 2))
+
+        # 通知表示時間 Spinbox
+        _sec_frame = tk.Frame(hdr, bg=C["accent"])
+        _sec_frame.pack(side="right", padx=(0, 4))
+        tk.Label(_sec_frame, text="Notify sec",
+                 bg=C["accent"], fg=C["accent_lt"],
+                 font=FONT_SMALL).pack(side="left")
+        tk.Spinbox(_sec_frame, textvariable=self._notify_display_sec,
+                   from_=3, to=60, width=3,
+                   bg=C["accent_dk"], fg="white",
+                   relief="flat", bd=0, font=FONT_SMALL,
+                   buttonbackground=C["accent_dk"],
+                   ).pack(side="left", padx=(2, 0))
 
         tk.Button(hdr, text="Screenshot",
                   command=self._open_screenshot,
@@ -2073,6 +2256,7 @@ class FolderLauncher(tk.Tk):
             self._footer_btn2.pack_forget()
         else:
             self._footer_btn.configure(text="+ Add Folder", command=self._add_folder)
+            self._footer_btn2.configure(text="+ Add File", command=self._add_file)
             self._footer_btn2.pack(side="left", fill="x", expand=True, padx=(2, 0))
 
     def _tab_context_menu(self, event, idx: int):
@@ -2319,11 +2503,26 @@ class FolderLauncher(tk.Tk):
     # ── Terminal list ─────────────────────────────────────
 
     def _render_terminal_list(self):
+        # ── 2ペイン構造（左: グループサイドバー, 右: 接続リスト）──
+        pane = tk.Frame(self._list_frame, bg=C["bg"])
+        pane.pack(fill="both", expand=True)
+
+        # 左サイドバー（幅固定 110px）
+        sidebar = tk.Frame(pane, bg=C["card"], width=110,
+                           highlightthickness=1, highlightbackground=C["border"])
+        sidebar.pack(side="left", fill="y", padx=(0, 4))
+        sidebar.pack_propagate(False)
+        self._render_group_sidebar(sidebar)
+
+        # 右メインエリア
+        main_frame = tk.Frame(pane, bg=C["bg"])
+        main_frame.pack(side="left", fill="both", expand=True)
+
         # ── ツールバー（検索・ソート）──────────────────────
-        toolbar = tk.Frame(self._list_frame, bg=C["bg"])
+        toolbar = tk.Frame(main_frame, bg=C["bg"])
         toolbar.pack(fill="x", pady=(0, 4))
 
-        tk.Label(toolbar, text="検索:", bg=C["bg"], fg=C["text_sub"],
+        tk.Label(toolbar, text="Search:", bg=C["bg"], fg=C["text_sub"],
                  font=FONT_SMALL).pack(side="left", padx=(2, 2))
         tk.Entry(toolbar, textvariable=self._conn_search,
                  font=FONT, bg="#F0EBF8", fg=C["text"],
@@ -2345,7 +2544,8 @@ class FolderLauncher(tk.Tk):
 
         sort_frame = tk.Frame(toolbar, bg=C["bg"])
         sort_frame.pack(side="right", padx=(4, 0))
-        for key, label in [("name", "Name"), ("protocol", "Proto"), ("host", "Host")]:
+        for key, label in [("name", "Name"), ("protocol", "Proto"),
+                            ("host", "Host"), ("count", "Count"), ("last", "Last")]:
             b = tk.Button(sort_frame, text=_hdr(key, label),
                           command=lambda k=key: _sort_cmd(k),
                           bg=C["tab_inact"], fg=C["text_sub"],
@@ -2358,12 +2558,14 @@ class FolderLauncher(tk.Tk):
 
         # ── フィルタリング & ソート ──────────────────────
         query = self._conn_search.get().lower()
+        sg = self._selected_group  # None = All
         conns_idx = [
             (i, c) for i, c in enumerate(self._conns)
-            if not query
-            or query in c["name"].lower()
-            or query in c["host"].lower()
-            or query in c["protocol"].lower()
+            if (sg is None or c.get("group", "") == sg)
+            and (not query
+                 or query in c["name"].lower()
+                 or query in c["host"].lower()
+                 or query in c["protocol"].lower())
         ]
         col = self._conn_sort["col"]
         rev = self._conn_sort["reverse"]
@@ -2373,27 +2575,31 @@ class FolderLauncher(tk.Tk):
             conns_idx.sort(key=lambda x: x[1]["protocol"].lower(), reverse=rev)
         elif col == "host":
             conns_idx.sort(key=lambda x: x[1]["host"].lower(), reverse=rev)
+        elif col == "count":
+            conns_idx.sort(key=lambda x: x[1].get("connect_count", 0), reverse=rev)
+        elif col == "last":
+            conns_idx.sort(key=lambda x: x[1].get("last_connected") or "", reverse=rev)
 
         if not conns_idx:
-            msg = ("No connections match." if query
+            msg = ("No connections match." if query or sg is not None
                    else "No connections registered.\nClick \"+ Add Connection\".")
-            tk.Label(self._list_frame, text=msg,
+            tk.Label(main_frame, text=msg,
                      bg=C["bg"], fg=C["text_sub"],
                      font=FONT_SMALL, justify="center").pack(pady=20)
             return
 
         for i, conn in conns_idx:
-            self._make_conn_card(i, conn)
+            self._make_conn_card(i, conn, main_frame)
 
-        # ── ドラッグ&ドロップ（ソート・検索なし時のみ有効）──
-        if col is not None or query:
+        # ── ドラッグ&ドロップ（ソート・検索・グループ絞り込みなし時のみ有効）──
+        if col is not None or query or sg is not None:
             return
-        cards = [w for w in self._list_frame.winfo_children()
+        cards = [w for w in main_frame.winfo_children()
                  if isinstance(w, tk.Frame) and w is not toolbar]
         dnd: dict = {"src": None, "moved": False}
 
         def _cards_now():
-            return [w for w in self._list_frame.winfo_children()
+            return [w for w in main_frame.winfo_children()
                     if isinstance(w, tk.Frame) and w is not toolbar]
 
         def on_press(e, card):
@@ -2421,7 +2627,23 @@ class FolderLauncher(tk.Tk):
                 w.pack(fill="x", pady=2, padx=2)
             dnd["moved"] = True
 
-        def on_release(_e):
+        def on_release(ev):
+            # サイドバーのグループボタンへのドロップをチェック
+            target = ev.widget.winfo_containing(ev.x_root, ev.y_root)
+            if (hasattr(self, "_sidebar_group_btns")
+                    and target in self._sidebar_group_btns
+                    and dnd["src"] is not None):
+                src_card = dnd["src"]
+                if hasattr(src_card, "_conn_orig_idx"):
+                    new_grp = self._sidebar_group_btns[target]
+                    if new_grp is None:
+                        new_grp = ""
+                    self._conns[src_card._conn_orig_idx]["group"] = new_grp
+                    self._save_conns()
+                    self._render_list()
+                dnd["src"]   = None
+                dnd["moved"] = False
+                return
             if dnd["moved"]:
                 new_order = [w._conn_orig_idx for w in _cards_now()
                              if hasattr(w, "_conn_orig_idx")]
@@ -2436,8 +2658,60 @@ class FolderLauncher(tk.Tk):
                 w.bind("<B1-Motion>",       lambda e, c=card_w: on_motion(e, c))
                 w.bind("<ButtonRelease-1>", on_release)
 
-    def _make_conn_card(self, idx: int, conn: dict):
-        card = tk.Frame(self._list_frame, bg=C["card"],
+    def _render_group_sidebar(self, parent: tk.Frame):
+        """左サイドバーにグループボタンを描画する。"""
+        self._sidebar_group_btns: dict = {}
+
+        def _select_group(grp: str | None):
+            self._selected_group = grp
+            self._render_list()
+
+        def _make_grp_btn(label: str, grp: str | None):
+            is_active = (self._selected_group == grp)
+            bg_c = C["accent"] if is_active else C["card"]
+            fg_c = "white" if is_active else C["text_sub"]
+            b = tk.Button(parent, text=label,
+                          command=lambda g=grp: _select_group(g),
+                          bg=bg_c, fg=fg_c,
+                          relief="flat", bd=0, font=FONT_SMALL,
+                          cursor="hand2", anchor="w", padx=6,
+                          activebackground=C["card_h"],
+                          activeforeground=C["text"],
+                          wraplength=100, justify="left")
+            b.pack(fill="x", pady=1, padx=2)
+            if not is_active:
+                _hover(b, C["card_h"], C["card"])
+            self._sidebar_group_btns[b] = grp
+            return b
+
+        _make_grp_btn("All", None)
+        for grp in self._terminal_groups:
+            b = _make_grp_btn(grp, grp)
+            # 右クリックメニュー（Rename / Delete）
+            menu = tk.Menu(parent, tearoff=0)
+            menu.add_command(label="Rename",
+                             command=lambda g=grp: self._rename_terminal_group(g))
+            menu.add_command(label="Delete",
+                             command=lambda g=grp: self._delete_terminal_group(g))
+            b.bind("<Button-3>", lambda e, m=menu: m.tk_popup(e.x_root, e.y_root))
+
+        # + グループ追加ボタン
+        add_btn = tk.Button(parent, text="+ Add Group",
+                            command=self._add_terminal_group,
+                            bg=C["bg"], fg=C["text_sub"],
+                            relief="flat", bd=0, font=FONT_SMALL,
+                            cursor="hand2", anchor="w", padx=6,
+                            activebackground=C["card_h"],
+                            activeforeground=C["text"],
+                            wraplength=100, justify="left")
+        add_btn.pack(fill="x", pady=(8, 1), padx=2)
+        _hover(add_btn, C["card_h"], C["bg"])
+
+    def _make_conn_card(self, idx: int, conn: dict,
+                        parent_frame: tk.Frame | None = None):
+        if parent_frame is None:
+            parent_frame = self._list_frame
+        card = tk.Frame(parent_frame, bg=C["card"],
                         pady=4, padx=8, relief="flat", bd=0,
                         highlightthickness=1, highlightbackground=C["border"])
         card._conn_orig_idx = idx   # ドラッグ&ドロップ用に元インデックスを保持
@@ -2448,7 +2722,12 @@ class FolderLauncher(tk.Tk):
 
         proto_color = {"SSH": C["accent"], "RDP": C["accent_dk"],
                        "SMB": C["text_sub"]}.get(conn["protocol"], C["text_sub"])
-        tk.Label(left, text=f"  {conn['name']}",
+        # グループバッジ（グループ未所属の場合は非表示）
+        grp = conn.get("group", "")
+        name_text = f"  {conn['name']}"
+        if grp:
+            name_text += f"  [{grp}]"
+        tk.Label(left, text=name_text,
                  bg=C["card"], fg=C["text"],
                  font=FONT_BOLD, anchor="w").pack(fill="x")
         if conn["protocol"] == "SMB":
@@ -2457,6 +2736,16 @@ class FolderLauncher(tk.Tk):
             ncmds = len(conn.get("commands", []))
             cmd_str = f"  {ncmds} cmd{'s' if ncmds != 1 else ''}" if ncmds else ""
             sub_text = f"{conn['protocol']}  {conn['user']}@{conn['host']}:{conn.get('port', 22)}{cmd_str}"
+        # 接続統計
+        cnt = conn.get("connect_count", 0)
+        last = conn.get("last_connected")
+        stats_parts = []
+        if cnt:
+            stats_parts.append(f"{cnt}x")
+        if last:
+            stats_parts.append(last[:10])  # ISO形式から日付部分のみ
+        if stats_parts:
+            sub_text += "  |  " + "  ".join(stats_parts)
         tk.Label(left, text=sub_text,
                  bg=C["card"], fg=proto_color,
                  font=FONT_SMALL, anchor="w").pack(fill="x")
@@ -2486,7 +2775,7 @@ class FolderLauncher(tk.Tk):
     # ── Terminal connection operations ────────────────────
 
     def _add_conn(self):
-        dlg = ConnectionDialog(self)
+        dlg = ConnectionDialog(self, groups=self._terminal_groups)
         if dlg.result is None:
             return
         conn = dlg.result
@@ -2504,10 +2793,16 @@ class FolderLauncher(tk.Tk):
             self._render_list()
 
     def _edit_conn(self, idx: int):
-        dlg = ConnectionDialog(self, initial=self._conns[idx])
+        dlg = ConnectionDialog(self, initial=self._conns[idx],
+                               groups=self._terminal_groups)
         if dlg.result is None:
             return
-        self._conns[idx] = dlg.result
+        # 統計データを引き継ぐ
+        prev = self._conns[idx]
+        result = dlg.result
+        result["connect_count"] = prev.get("connect_count", 0)
+        result["last_connected"] = prev.get("last_connected")
+        self._conns[idx] = result
         self._save_conns()
         self._render_list()
 
@@ -2520,8 +2815,70 @@ class FolderLauncher(tk.Tk):
                 _launch_smb(conn)
             else:
                 _launch_teraterm(conn)
+            # 接続統計を更新（self._conns の実体を更新）
+            for c in self._conns:
+                if c is conn or (c.get("name") == conn.get("name") and
+                                 c.get("host") == conn.get("host")):
+                    c["connect_count"] = c.get("connect_count", 0) + 1
+                    c["last_connected"] = datetime.datetime.now().isoformat(timespec="seconds")
+                    break
+            self._save_conns()
         except Exception as e:
             messagebox.showerror("Error", f"Failed to connect:\n{e}", parent=self)
+
+    # ── Terminal group operations ─────────────────────────
+
+    def _add_terminal_group(self):
+        name = simpledialog.askstring("Add Group", "Group name:",
+                                      parent=self)
+        if not name:
+            return
+        name = name.strip()
+        if not name:
+            return
+        if name in self._terminal_groups:
+            messagebox.showwarning("Duplicate", f'Group "{name}" already exists.', parent=self)
+            return
+        self._terminal_groups.append(name)
+        self._save_config()
+        self._render_list()
+
+    def _rename_terminal_group(self, grp: str):
+        new_name = simpledialog.askstring("Rename Group",
+                                          f'New name for "{grp}":',
+                                          initialvalue=grp, parent=self)
+        if not new_name:
+            return
+        new_name = new_name.strip()
+        if not new_name or new_name == grp:
+            return
+        if new_name in self._terminal_groups:
+            messagebox.showwarning("Duplicate", f'Group "{new_name}" already exists.', parent=self)
+            return
+        idx = self._terminal_groups.index(grp)
+        self._terminal_groups[idx] = new_name
+        for conn in self._conns:
+            if conn.get("group") == grp:
+                conn["group"] = new_name
+        if self._selected_group == grp:
+            self._selected_group = new_name
+        self._save_config()
+        self._render_list()
+
+    def _delete_terminal_group(self, grp: str):
+        if not messagebox.askyesno(
+                "Delete Group",
+                f'Delete group "{grp}"?\n(Connections will be moved to ungrouped.)',
+                parent=self):
+            return
+        self._terminal_groups.remove(grp)
+        for conn in self._conns:
+            if conn.get("group") == grp:
+                conn["group"] = ""
+        if self._selected_group == grp:
+            self._selected_group = None
+        self._save_config()
+        self._render_list()
 
     # ── Task list ─────────────────────────────────────────
 
@@ -3195,7 +3552,7 @@ class FolderLauncher(tk.Tk):
 
         preview_btn = tk.Button(
             card, text="Preview",
-            command=lambda i=idx: NotificationPopup(self, self._notify_items[i]),
+            command=lambda i=idx: NotificationPopup(self, self._notify_items[i], self._notify_display_sec.get() * 1000),
             bg=card_bg, fg=C["text_sub"],
             relief="flat", bd=0,
             font=FONT_SMALL, cursor="hand2",
@@ -3327,7 +3684,7 @@ class FolderLauncher(tk.Tk):
             key = f"{i}_{sched_str}"
             if notify_at <= now < sched and key not in self._notified:
                 self._notified.add(key)
-                NotificationPopup(self, item)
+                NotificationPopup(self, item, self._notify_display_sec.get() * 1000)
                 open_paths = item.get("open_paths", [])
                 if not open_paths and item.get("open_path"):
                     open_paths = [item["open_path"]]
@@ -3384,7 +3741,7 @@ class LoginWindow(tk.Tk):
         self.authenticated = False
 
         self._icon = tk.PhotoImage(data=_make_icon_png())
-        self.wm_iconphoto(True, self._icon)
+        _setup_taskbar_icon(self)
 
         self._build()
 
