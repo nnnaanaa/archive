@@ -333,6 +333,27 @@ def _launch_teraterm(conn: dict):
 
     PROMPT = "wait '$' '#' '%' '>'"
 
+    def _ttl_sendln(s: str) -> list[str]:
+        """TTL の sendln コードを生成する。シングルクォートを含む場合も正しく処理する。"""
+        if "'" not in s:
+            return [f"sendln '{s}'"]
+        # シングルクォートを strconcat + char2str(39) で組み立てる
+        parts = s.split("'")
+        lines = [f"_s = '{parts[0]}'"]
+        for part in parts[1:]:
+            lines += ["char2str _c 39", "strconcat _s _c"]
+            if part:
+                lines.append(f"strconcat _s '{part}'")
+        lines.append("sendln _s")
+        return lines
+
+    def _write_ttl(lines: list[str]) -> str:
+        """TTL スクリプトを一時ファイルに書き出してパスを返す。"""
+        with tempfile.NamedTemporaryFile(mode="w", suffix=".ttl",
+                                         delete=False, encoding="utf-8") as f:
+            f.write("\r\n".join(lines) + "\r\n")
+            return f.name
+
     if proto == "SSH":
         # SSH: CLI引数でuser/pass渡し、コマンドがあればTTLでプロンプト待機
         if cmds:
@@ -341,13 +362,8 @@ def _launch_teraterm(conn: dict):
                 PROMPT,
             ]
             for cmd in cmds:
-                ttl_lines.append(f"sendln '{cmd}'")
-                ttl_lines.append(PROMPT)
-            with tempfile.NamedTemporaryFile(mode="w", suffix=".ttl",
-                                             delete=False, encoding="utf-8") as f:
-                f.write("\n".join(ttl_lines) + "\n")
-                ttl_path = f.name
-            ttl_arg = [f"/M={ttl_path}"]
+                ttl_lines += ["timeout = 60", "mpause 300"] + _ttl_sendln(cmd) + [PROMPT]
+            ttl_arg = [f"/M={_write_ttl(ttl_lines)}"]
         else:
             ttl_arg = []
         args = [
@@ -361,27 +377,22 @@ def _launch_teraterm(conn: dict):
     else:  # Telnet: TTLスクリプトでlogin/passwordプロンプトに自動入力
         ttl_lines = [
             "timeout = 30",
-            # login: または Username: プロンプト待機
-            "wait 'ogin:' 'sername:'",
-            f"sendln '{user}'",
-            # Password: プロンプト待機
+            # login: / Login: / Username: / User: など各機器のプロンプトに対応
+            "wait 'ogin:' 'sername:' 'ser:'",
+            "mpause 300",   # プロンプト受信後、機器が入力待ちになるまで少し待つ
+        ] + _ttl_sendln(user) + [
             "wait 'assword:'",
-            f"sendln '{pw}'",
-            # シェルプロンプト待機
+            "mpause 300",
+        ] + _ttl_sendln(pw) + [
             PROMPT,
         ]
         for cmd in cmds:
-            ttl_lines.append(f"sendln '{cmd}'")
-            ttl_lines.append(PROMPT)
-        with tempfile.NamedTemporaryFile(mode="w", suffix=".ttl",
-                                         delete=False, encoding="utf-8") as f:
-            f.write("\n".join(ttl_lines) + "\n")
-            ttl_path = f.name
+            ttl_lines += ["timeout = 60", "mpause 300"] + _ttl_sendln(cmd) + [PROMPT]
         args = [
             exe,
             f"{host}:{port}",
             "/telnet",
-        ] + charset_arg + log_arg + [f"/M={ttl_path}"]
+        ] + charset_arg + log_arg + [f"/M={_write_ttl(ttl_lines)}"]
 
     subprocess.Popen(args)
 
@@ -2034,6 +2045,13 @@ class FolderLauncher(tk.Tk):
     # _active >= 0  : folder category index
     # _active == -1 : Terminal tab
 
+    # Ping モニター定数
+    _PING_HISTORY = 30   # 棒グラフで保持する件数
+    _PING_BAR_W   = 16   # バー幅 (px)
+    _PING_BAR_GAP = 2    # バー間隔 (px)
+    _PING_ROW_H   = 80   # ホスト行の高さ (px)
+    _PING_MAX_MS  = 500  # グラフ縦軸上限 (ms)
+
     def __init__(self):
         super().__init__()
         self.title("Gem")
@@ -2183,6 +2201,8 @@ class FolderLauncher(tk.Tk):
             "notify_display_sec":  self._notify_display_sec.get() if hasattr(self, "_notify_display_sec") else 8,
             "theme":           self._theme,
             "clipboard_history": self._clip_history,
+            "ping_hosts":    self._ping_hosts,
+            "ping_interval": self._ping_interval,
         }
         CONFIG_FILE.write_text(
             json.dumps(cfg, ensure_ascii=False, indent=2),
@@ -2477,11 +2497,32 @@ class FolderLauncher(tk.Tk):
             activeforeground=C["text"],
         ).pack(side="right")
 
+        # Ping tab (left of Clip, fixed)
+        is_ping = (self._active == -6)
+        tk.Button(
+            self._tab_bar,
+            text="Ping",
+            command=lambda: self._switch_tab(-6),
+            bg=C["tab_act"] if is_ping else C["tab_inact"],
+            fg=C["text"] if is_ping else C["text_sub"],
+            relief="flat", bd=0,
+            font=FONT_BOLD if is_ping else FONT,
+            cursor="hand2", padx=10, pady=5,
+            activebackground=C["tab_act"],
+            activeforeground=C["text"],
+        ).pack(side="right")
+
     def _switch_tab(self, idx: int):
+        # Pingタブを離れるときはモニターを停止する
+        if self._active == -6 and idx != -6:
+            self._ping_stop()
         self._active = idx
         self._render_tabs()
         self._update_footer()
         self._render_list()
+        # Pingタブに入ったときはモニターを開始する
+        if idx == -6:
+            self._ping_start()
 
     def _update_footer(self):
         """Update footer button text/command based on active tab."""
@@ -2503,6 +2544,9 @@ class FolderLauncher(tk.Tk):
             self._footer_btn2.pack(side="left", fill="x", expand=True, padx=(2, 0))
         elif self._active == -5:
             self._footer_btn.configure(text="Clear All", command=self._clear_clip_history)
+            self._footer_btn2.pack_forget()
+        elif self._active == -6:
+            self._footer_btn.configure(text="+ Add Host", command=self._ping_add_host)
             self._footer_btn2.pack_forget()
         else:
             self._footer_btn.configure(text="+ Add Folder", command=self._add_folder)
@@ -2573,6 +2617,8 @@ class FolderLauncher(tk.Tk):
             self._render_bookmark_list()
         elif self._active == -5:
             self._render_clip_list()
+        elif self._active == -6:
+            self._render_ping_list()
         else:
             self._render_folder_list()
 
@@ -3254,6 +3300,300 @@ class FolderLauncher(tk.Tk):
         self._save_config()
         self._render_tabs()
         self._render_list()
+
+    # ── Ping monitor ──────────────────────────────────────
+
+    def _render_ping_list(self):
+        """Ping モニター UI を描画する。"""
+        # ── 設定バー ──────────────────────────────────────
+        cfg_bar = tk.Frame(self._list_frame, bg=C["bg"])
+        cfg_bar.pack(fill="x", pady=(0, 4))
+
+        tk.Label(cfg_bar, text="Interval:", bg=C["bg"], fg=C["text_sub"],
+                 font=FONT_SMALL).pack(side="left", padx=(2, 2))
+        self._ping_interval_var = tk.StringVar(value=str(self._ping_interval))
+        tk.Entry(cfg_bar, textvariable=self._ping_interval_var,
+                 width=4, font=FONT, bg=C["card"], fg=C["text"],
+                 relief="flat", bd=1, insertbackground=C["accent"],
+                 ).pack(side="left")
+        tk.Label(cfg_bar, text="sec", bg=C["bg"], fg=C["text_sub"],
+                 font=FONT_SMALL).pack(side="left", padx=(2, 8))
+
+        def _apply_interval():
+            try:
+                v = int(self._ping_interval_var.get())
+                if v > 0:
+                    self._ping_interval = v
+                    self._save_config()
+            except ValueError:
+                pass
+
+        tk.Button(cfg_bar, text="Apply", command=_apply_interval,
+                  bg=C["tab_inact"], fg=C["text_sub"], relief="flat", bd=0,
+                  font=FONT_SMALL, cursor="hand2", padx=6, pady=2,
+                  activebackground=C["card_h"],
+                  activeforeground=C["text"]).pack(side="left")
+
+        tk.Label(cfg_bar, text=f"{len(self._ping_hosts)} host(s)",
+                 bg=C["bg"], fg=C["text_sub"],
+                 font=FONT_SMALL).pack(side="right", padx=8)
+
+        # ── スクロール可能エリア ───────────────────────
+        outer = tk.Frame(self._list_frame, bg=C["bg"])
+        outer.pack(fill="both", expand=True)
+
+        vsb = tk.Scrollbar(outer, orient="vertical")
+        vsb.pack(side="right", fill="y")
+
+        scroll_cv = tk.Canvas(outer, bg=C["bg"],
+                              yscrollcommand=vsb.set,
+                              highlightthickness=0)
+        scroll_cv.pack(side="left", fill="both", expand=True)
+        vsb.configure(command=scroll_cv.yview)
+
+        inner = tk.Frame(scroll_cv, bg=C["bg"])
+        win_id = scroll_cv.create_window(0, 0, anchor="nw", window=inner)
+
+        def _on_inner_cfg(e):
+            scroll_cv.configure(scrollregion=scroll_cv.bbox("all"))
+
+        def _on_cv_cfg(e):
+            scroll_cv.itemconfigure(win_id, width=e.width)
+
+        inner.bind("<Configure>", _on_inner_cfg)
+        scroll_cv.bind("<Configure>", _on_cv_cfg)
+        scroll_cv.bind("<MouseWheel>",
+                       lambda e: scroll_cv.yview_scroll(int(-1*(e.delta/120)), "units"))
+
+        if not self._ping_hosts:
+            tk.Label(inner,
+                     text="接続先ホストを追加してください\n（「+ Add Host」ボタン）",
+                     bg=C["bg"], fg=C["text_sub"],
+                     font=FONT_SMALL, justify="center").pack(pady=30)
+            return
+
+        # ── 各ホスト行 ─────────────────────────────────
+        self._ping_row_canvases = {}
+        self._ping_status_dots  = {}
+        self._ping_stat_labels  = {}
+        bar_area_w = (self._PING_BAR_W + self._PING_BAR_GAP) * self._PING_HISTORY
+
+        for host in self._ping_hosts:
+            row = tk.Frame(inner, bg=C["card"],
+                           highlightthickness=1, highlightbackground=C["border"])
+            row.pack(fill="x", padx=4, pady=2)
+
+            # 左：ステータスドット + ホスト名 + 統計テキスト
+            lbl_frame = tk.Frame(row, bg=C["card"], width=160)
+            lbl_frame.pack(side="left", fill="y")
+            lbl_frame.pack_propagate(False)
+
+            name_row = tk.Frame(lbl_frame, bg=C["card"])
+            name_row.pack(fill="x", padx=6, pady=(10, 0))
+            dot_cv = tk.Canvas(name_row, width=10, height=10,
+                               bg=C["card"], highlightthickness=0)
+            dot_cv.pack(side="left", padx=(0, 4))
+            dot_cv.create_oval(1, 1, 9, 9, fill=C["text_sub"], outline="", tags="dot")
+            self._ping_status_dots[host] = dot_cv
+
+            short = host if len(host) <= 20 else host[:19] + "…"
+            tk.Label(name_row, text=short, bg=C["card"], fg=C["text"],
+                     font=FONT_SMALL, anchor="w").pack(side="left")
+
+            sv = tk.StringVar(value="---")
+            self._ping_stat_vars[host] = sv
+            stat_lbl = tk.Label(lbl_frame, textvariable=sv,
+                                bg=C["card"], fg=C["text_sub"],
+                                font=("Segoe UI", 7), anchor="w")
+            stat_lbl.pack(fill="x", padx=6)
+            self._ping_stat_labels[host] = stat_lbl
+
+            # 中：棒グラフ Canvas
+            cv = tk.Canvas(row, bg=C["card"],
+                           width=bar_area_w, height=self._PING_ROW_H,
+                           highlightthickness=0)
+            cv.pack(side="left", padx=(0, 4))
+            self._ping_row_canvases[host] = cv
+
+            # 右：削除ボタン
+            def _del(h=host):
+                if h in self._ping_hosts:
+                    self._ping_hosts.remove(h)
+                if h in self._ping_data:
+                    del self._ping_data[h]
+                self._save_config()
+                self._render_list()
+
+            del_btn = tk.Button(row, text="✕", command=_del,
+                                bg=C["card"], fg=C["btn_del"],
+                                relief="flat", bd=0, font=("Segoe UI", 11),
+                                cursor="hand2",
+                                activebackground=C["card"],
+                                activeforeground=C["btn_del_h"])
+            del_btn.pack(side="right", padx=(0, 6))
+
+        # 初回描画
+        self._ping_redraw()
+
+    def _ping_redraw(self):
+        """全ホストの棒グラフを再描画する。メインスレッドから呼ぶこと。"""
+        if not hasattr(self, "_ping_row_canvases"):
+            return
+
+        bw      = self._PING_BAR_W
+        bg_gap  = self._PING_BAR_GAP
+        row_h   = self._PING_ROW_H
+        max_ms  = self._PING_MAX_MS
+
+        for host, cv in self._ping_row_canvases.items():
+            cv.delete("all")
+            history = self._ping_data.get(host, [])
+
+            # グリッド線
+            for gms in [100, 200, 300]:
+                gy = row_h - int(gms / max_ms * (row_h - 8)) - 4
+                if gy < 2:
+                    continue
+                cv.create_line(0, gy, (bw + bg_gap) * self._PING_HISTORY, gy,
+                               fill=C["border"], dash=(2, 4))
+                cv.create_text(2, gy - 1, text=f"{gms}", anchor="sw",
+                               fill=C["text_sub"], font=("Segoe UI", 6))
+
+            # バー描画
+            for j, ms in enumerate(history):
+                x = j * (bw + bg_gap)
+                if ms is None:
+                    # タイムアウト
+                    cv.create_rectangle(x, 4, x + bw, row_h - 4,
+                                        fill="#CC3344", outline="")
+                    cv.create_text(x + bw // 2, row_h // 2,
+                                   text="TO", fill="white",
+                                   font=("Segoe UI", 6))
+                else:
+                    clipped = min(ms, max_ms)
+                    bh = max(3, int(clipped / max_ms * (row_h - 12)))
+                    color = (C["accent"]    if ms < 100 else
+                             C["accent_dk"] if ms < 200 else
+                             "#DD8844")
+                    cv.create_rectangle(x, row_h - 4 - bh, x + bw, row_h - 4,
+                                        fill=color, outline="")
+                    if bh >= 16:
+                        cv.create_text(x + bw // 2, row_h - 4 - bh // 2,
+                                       text=str(int(ms)), fill="white",
+                                       font=("Segoe UI", 6))
+
+            # 統計テキスト更新
+            if host in self._ping_stat_vars and history:
+                last = history[-1]
+                vals = [v for v in history if v is not None]
+                if last is None:
+                    stat = "Timeout"
+                elif vals:
+                    avg = sum(vals) / len(vals)
+                    mn  = min(vals)
+                    stat = f"{int(last)}ms  avg {int(avg)}ms  min {int(mn)}ms"
+                else:
+                    stat = f"{int(last)}ms"
+                self._ping_stat_vars[host].set(stat)
+
+                # ステータスドット・ラベル色を更新（緑=OK / 赤=Timeout）
+                ok = (last is not None)
+                dot_color  = "#44CC77" if ok else "#CC3344"
+                stat_color = "#44CC77" if ok else "#CC4455"
+                if host in self._ping_status_dots:
+                    self._ping_status_dots[host].itemconfigure("dot", fill=dot_color)
+                if host in self._ping_stat_labels:
+                    self._ping_stat_labels[host].configure(fg=stat_color)
+
+    def _ping_add_host(self):
+        """Ping ホスト追加ダイアログを開く。ターミナル接続先を候補として提示する。"""
+        suggestions = [c["host"] for c in self._conns
+                       if c["host"] not in self._ping_hosts]
+        hint = "ホスト名または IP アドレス"
+        if suggestions:
+            hint += f"\n例: {', '.join(suggestions[:4])}"
+        dlg = InputDialog(self, "Add Ping Host", hint)
+        if dlg.result is None:
+            return
+        host = dlg.result.strip()
+        if not host:
+            return
+        if host in self._ping_hosts:
+            messagebox.showinfo("Info", f"'{host}' は既に登録済みです。", parent=self)
+            return
+        self._ping_hosts.append(host)
+        self._ping_data[host] = []
+        self._save_config()
+        self._render_list()
+
+    def _ping_start(self):
+        """Ping モニターを開始する。"""
+        if self._ping_running:
+            return
+        self._ping_running = True
+        # 既存データを保持しつつ、新ホストの分を初期化
+        for h in self._ping_hosts:
+            self._ping_data.setdefault(h, [])
+        self._ping_schedule_round()
+
+    def _ping_stop(self):
+        """Ping モニターを停止する。"""
+        self._ping_running = False
+        if self._ping_next_id is not None:
+            self.after_cancel(self._ping_next_id)
+            self._ping_next_id = None
+        if self._ping_graph_id is not None:
+            self.after_cancel(self._ping_graph_id)
+            self._ping_graph_id = None
+
+    def _ping_schedule_round(self):
+        """次の ping ラウンドをスレッドで起動する。"""
+        if not self._ping_running:
+            return
+        threading.Thread(target=self._ping_round, daemon=True).start()
+
+    def _ping_round(self):
+        """全ホストへ並列 ping を実行し、終了後にグラフを更新する。"""
+        hosts = list(self._ping_hosts)
+        threads = [
+            threading.Thread(target=self._ping_one, args=(h,), daemon=True)
+            for h in hosts
+        ]
+        for t in threads:
+            t.start()
+        for t in threads:
+            t.join(timeout=3.5)
+        if self._ping_running:
+            self.after(0, self._ping_redraw)
+            interval_ms = max(1000, self._ping_interval * 1000)
+            self._ping_next_id = self.after(interval_ms, self._ping_schedule_round)
+
+    def _ping_one(self, host: str):
+        """1 ホストへ ping を実行し、応答時間を _ping_data に追加する。"""
+        try:
+            result = subprocess.run(
+                ["ping", "-n", "1", "-w", "2000", host],
+                capture_output=True, text=True, timeout=3.0,
+            )
+            if "TTL=" in result.stdout or "ttl=" in result.stdout:
+                # 英語: "time=5ms" / "time<1ms"、日本語: "時間 =5ms" / "時間 <1ms"
+                m = re.search(r"(?:[Tt]ime|時間)\s*=\s*(\d+)\s*ms", result.stdout)
+                if m:
+                    ms = float(m.group(1))
+                elif re.search(r"(?:[Tt]ime|時間)\s*<", result.stdout):
+                    ms = 0.5  # <1ms は 0.5ms として扱う
+                else:
+                    ms = 1.0  # TTLあり・時間不詳は 1ms 扱い
+            else:
+                ms = None
+        except Exception:
+            ms = None
+
+        with self._ping_lock:
+            hist = self._ping_data.setdefault(host, [])
+            hist.append(ms)
+            if len(hist) > self._PING_HISTORY:
+                hist.pop(0)
 
     def _render_bookmark_list(self):
         pane = tk.Frame(self._list_frame, bg=C["bg"])
