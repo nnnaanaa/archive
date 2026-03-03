@@ -18,7 +18,9 @@ import tempfile
 import threading
 import time
 import io
+import re
 import calendar
+import webbrowser
 from ctypes import wintypes
 from pathlib import Path
 from PIL import ImageGrab
@@ -43,25 +45,112 @@ C = {
     "btn_del_h": "#A870B8",
 }
 
+THEMES: dict[str, dict] = {
+    "lavender": {   # デフォルト（既存 C と同値）
+        "bg": "#EDE8F5", "card": "#F5F2FC", "card_h": "#DDD4F4",
+        "accent": "#8B7CC8", "accent_dk": "#6A5BAA", "accent_lt": "#C4B8E8",
+        "text": "#3A2D6E", "text_sub": "#7B6DB0", "border": "#C0B0E0",
+        "tab_act": "#F5F2FC", "tab_inact": "#D8CFF0",
+        "btn_del": "#C8A0D0", "btn_del_h": "#A870B8",
+    },
+    "dark": {
+        "bg": "#1E1E2E", "card": "#2A2A3E", "card_h": "#363650",
+        "accent": "#7C6FBD", "accent_dk": "#5A4FA0", "accent_lt": "#9A8ED4",
+        "text": "#E0DEFF", "text_sub": "#A09CC0", "border": "#4A4A6A",
+        "tab_act": "#2A2A3E", "tab_inact": "#252535",
+        "btn_del": "#7A4060", "btn_del_h": "#A05080",
+    },
+    "light": {
+        "bg": "#F8F8FC", "card": "#FFFFFF", "card_h": "#EEF0FF",
+        "accent": "#6655BB", "accent_dk": "#4A3DA0", "accent_lt": "#A89DD4",
+        "text": "#222244", "text_sub": "#666699", "border": "#CCCCEE",
+        "tab_act": "#FFFFFF", "tab_inact": "#E8E8F8",
+        "btn_del": "#DD8899", "btn_del_h": "#BB5566",
+    },
+    "gemini": {   # Gemini風：クリーンホワイト + Google ブルー〜バイオレット
+        "bg": "#F8F9FA", "card": "#FFFFFF", "card_h": "#E8F0FE",
+        "accent": "#1B6EF3", "accent_dk": "#1251B5", "accent_lt": "#A8C7FA",
+        "text": "#202124", "text_sub": "#5F6368", "border": "#DADCE0",
+        "tab_act": "#FFFFFF", "tab_inact": "#F1F3F4",
+        "btn_del": "#D93025", "btn_del_h": "#A50E0E",
+    },
+    "claude": {   # Claude Code風：ほぼ黒 + コーラルオレンジ
+        "bg": "#1A1A1A", "card": "#242424", "card_h": "#2E2E2E",
+        "accent": "#DA7756", "accent_dk": "#B85C3C", "accent_lt": "#E89A7A",
+        "text": "#F0EDE8", "text_sub": "#9E9890", "border": "#383838",
+        "tab_act": "#242424", "tab_inact": "#1E1E1E",
+        "btn_del": "#8B3A3A", "btn_del_h": "#B04848",
+    },
+    "devil": {   # 小悪魔：漆黒＋クリムゾンレッド
+        "bg": "#1A0A0E", "card": "#240F14", "card_h": "#331520",
+        "accent": "#CC2244", "accent_dk": "#991833", "accent_lt": "#E06078",
+        "text": "#F5E8EA", "text_sub": "#C09098", "border": "#4A1A25",
+        "tab_act": "#240F14", "tab_inact": "#1E0B10",
+        "btn_del": "#882030", "btn_del_h": "#BB3045",
+    },
+}
+
+ICON_PALETTES: dict[str, dict] = {
+    "lavender": {
+        "BDR": ( 42,  32,  88, 255), "HL": (222, 213, 243, 255),
+        "LT":  (178, 165, 220, 255), "F":  (128, 112, 190, 255),
+        "MD":  ( 98,  82, 155, 255), "DK": ( 58,  46, 108, 255),
+        "SP":  (215, 208, 242, 210),
+    },
+    "dark": {
+        "BDR": ( 20,  15,  50, 255), "HL": (180, 168, 220, 255),
+        "LT":  (150, 138, 205, 255), "F":  (124, 111, 189, 255),
+        "MD":  ( 90,  79, 160, 255), "DK": ( 50,  40, 110, 255),
+        "SP":  (175, 165, 220, 200),
+    },
+    "light": {
+        "BDR": ( 35,  25,  80, 255), "HL": (200, 192, 228, 255),
+        "LT":  (165, 153, 210, 255), "F":  (102,  85, 187, 255),
+        "MD":  ( 74,  61, 160, 255), "DK": ( 45,  35, 100, 255),
+        "SP":  (195, 185, 228, 210),
+    },
+    "gemini": {
+        "BDR": ( 10,  35,  90, 255), "HL": (168, 199, 250, 255),
+        "LT":  (110, 160, 245, 255), "F":  ( 27, 110, 243, 255),
+        "MD":  ( 18,  81, 181, 255), "DK": ( 10,  50, 130, 255),
+        "SP":  (168, 199, 250, 200),
+    },
+    "claude": {
+        "BDR": ( 70,  30,  10, 255), "HL": (232, 154, 122, 255),
+        "LT":  (220, 135, 100, 255), "F":  (218, 119,  86, 255),
+        "MD":  (184,  92,  60, 255), "DK": (115,  52,  28, 255),
+        "SP":  (235, 165, 130, 200),
+    },
+    "devil": {
+        "BDR": ( 60,   8,  15, 255), "HL": (240, 160, 175, 255),
+        "LT":  (210,  90, 115, 255), "F":  (180,  28,  60, 255),
+        "MD":  (130,  18,  42, 255), "DK": ( 75,   8,  22, 255),
+        "SP":  (220, 100, 120, 200),
+    },
+}
+
 FONT       = ("Segoe UI", 10)
 FONT_BOLD  = ("Segoe UI", 10, "bold")
 FONT_SMALL = ("Segoe UI", 8)
 
+CLIP_MAX = 50   # クリップボード履歴の最大保持件数
+
 
 # ── Icon generation ───────────────────────────────────────
 
-def _make_icon_png() -> str:
+def _make_icon_png(palette: dict | None = None) -> str:
     """輪郭線付きカットジェム＋スパークルアイコン PNG を生成して Base64 返却する。"""
+    p = palette or ICON_PALETTES["lavender"]
     W, H = 32, 32
     T   = (  0,   0,   0,   0)  # transparent
-    BDR = ( 42,  32,  88, 255)  # dark outline
-    WH  = (255, 254, 255, 255)  # shine white
-    HL  = (222, 213, 243, 255)  # highlight
-    LT  = (178, 165, 220, 255)  # light crown
-    F   = (128, 112, 190, 255)  # main
-    MD  = ( 98,  82, 155, 255)  # mid shadow
-    DK  = ( 58,  46, 108, 255)  # deep shadow
-    SP  = (215, 208, 242, 210)  # sparkle
+    BDR = p["BDR"]               # dark outline
+    WH  = (255, 254, 255, 255)  # shine white（常に白）
+    HL  = p["HL"]                # highlight
+    LT  = p["LT"]                # light crown
+    F   = p["F"]                 # main
+    MD  = p["MD"]                # mid shadow
+    DK  = p["DK"]                # deep shadow
+    SP  = p["SP"]                # sparkle
 
     # ジェム輪郭 {y: (x_left, x_right)} 両端含む — 32x32 をほぼ全域使用
     ROWS = {
@@ -156,21 +245,24 @@ def _make_icon_png() -> str:
     return base64.b64encode(png).decode()
 
 
-def _setup_taskbar_icon(root: tk.Tk) -> None:
+def _setup_taskbar_icon(root: tk.Tk, palette: dict | None = None) -> None:
     """AppUserModelID を設定し、ICO ファイルでタスクバーアイコンを適用する。"""
-    # Python 本体から分離して独立したタスクバーボタンにする
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Gem.Launcher.1")
     except Exception:
         pass
 
     ico_path = Path(__file__).parent / "gem.ico"
-    script_mtime = Path(__file__).stat().st_mtime
-    ico_mtime    = ico_path.stat().st_mtime if ico_path.exists() else 0
-    if not ico_path.exists() or script_mtime > ico_mtime:
+    # パレット指定時（テーマ変更）は常に再生成、初回はスクリプト更新時のみ
+    force = palette is not None
+    if not force:
+        script_mtime = Path(__file__).stat().st_mtime
+        ico_mtime    = ico_path.stat().st_mtime if ico_path.exists() else 0
+        force = not ico_path.exists() or script_mtime > ico_mtime
+    if force:
         try:
             from PIL import Image
-            png_data = base64.b64decode(_make_icon_png())
+            png_data = base64.b64decode(_make_icon_png(palette))
             img = Image.open(io.BytesIO(png_data)).convert("RGBA")
             img.save(str(ico_path), format="ICO",
                      sizes=[(16, 16), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
@@ -487,6 +579,70 @@ class ConnectionDialog(tk.Toplevel):
             "charset":  charset,
             "group":    self._group_var.get().strip(),
         }
+        self.destroy()
+
+
+# ── Bookmark dialog ───────────────────────────────────────
+
+class BookmarkDialog(tk.Toplevel):
+    """ブックマークの追加・編集ダイアログ。"""
+
+    def __init__(self, parent, initial: dict | None = None):
+        super().__init__(parent)
+        self.title("Add Bookmark" if initial is None else "Edit Bookmark")
+        self.configure(bg=C["bg"])
+        self.resizable(False, False)
+        self.grab_set()
+        self.result: dict | None = None
+
+        d = initial or {}
+        self._name_var = tk.StringVar(value=d.get("name", ""))
+        self._url_var  = tk.StringVar(value=d.get("url",  ""))
+
+        self._build()
+        self.update_idletasks()
+        px = parent.winfo_x() + (parent.winfo_width()  - self.winfo_width())  // 2
+        py = parent.winfo_y() + (parent.winfo_height() - self.winfo_height()) // 2
+        self.geometry(f"+{px}+{py}")
+        self.wait_window()
+
+    def _build(self):
+        form = tk.Frame(self, bg=C["bg"])
+        form.pack(padx=16, pady=(14, 6))
+
+        for row, (label, var) in enumerate([("Name", self._name_var),
+                                            ("URL",  self._url_var)]):
+            tk.Label(form, text=label, bg=C["bg"], fg=C["text_sub"],
+                     font=FONT_SMALL, anchor="e", width=6).grid(
+                         row=row, column=0, padx=(0, 6), pady=4, sticky="e")
+            tk.Entry(form, textvariable=var, font=FONT,
+                     bg="#F0EBF8", fg=C["text"], relief="flat", bd=1,
+                     insertbackground=C["accent"], width=30).grid(
+                         row=row, column=1, pady=4, sticky="ew")
+
+        btn_frame = tk.Frame(self, bg=C["bg"])
+        btn_frame.pack(fill="x", padx=16, pady=(4, 14))
+        tk.Button(btn_frame, text="Save", command=self._ok,
+                  bg=C["accent"], fg="white", relief="flat", bd=0,
+                  font=FONT_BOLD, cursor="hand2", padx=12, pady=4,
+                  activebackground=C["accent_dk"], activeforeground="white",
+                  ).pack(side="right", padx=(4, 0))
+        tk.Button(btn_frame, text="Cancel", command=self.destroy,
+                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  font=FONT, cursor="hand2", padx=10, pady=4,
+                  activebackground=C["border"], activeforeground=C["text"],
+                  ).pack(side="right")
+
+    def _ok(self):
+        name = self._name_var.get().strip()
+        url  = self._url_var.get().strip()
+        if not name or not url:
+            messagebox.showwarning("Input Error",
+                                   "Name and URL are required.", parent=self)
+            return
+        if not url.startswith("http"):
+            url = "https://" + url
+        self.result = {"name": name, "url": url}
         self.destroy()
 
 
@@ -1886,18 +2042,35 @@ class FolderLauncher(tk.Tk):
         self.configure(bg=C["bg"])
         self.minsize(320, 260)
 
-        self._icon = tk.PhotoImage(data=_make_icon_png())
-        _setup_taskbar_icon(self)
-
-        # 全設定を config.json から一括読み込み
+        # 全設定を config.json から一括読み込み（テーマ決定が先）
         self._data: list[dict] = []
         self._conns: list[dict] = []
         self._tasks: list[dict] = []
         self._notify_items: list[dict] = []
         self._terminal_groups: list[str] = []
         self._selected_group: str | None = None   # None = All
-        self._active: int = 0   # -1 = Terminal tab, -2 = Tasks, -3 = Notify
+        self._bookmarks: list[dict] = []
+        self._bm_selected: int = 0
+        self._active: int = 0   # -1=Terminal, -2=Tasks, -3=Notify, -4=Web, -5=Clip, -6=Ping
+        self._theme: str = "lavender"   # _load_config() で上書きされる
+        self._tick_id = None             # _tick() の after ID（再構築時のキャンセル用）
+        self._clip_history: list[dict] = []   # {"text": str, "ts": str}
+        self._clip_prev: str = ""             # 前回クリップボード値（変化検知用）
+        self._ping_hosts: list[str] = []
+        self._ping_data:  dict[str, list] = {}   # host -> [ms|None, ...]
+        self._ping_interval: int = 5
+        self._ping_running: bool = False
+        self._ping_lock = threading.Lock()
+        self._ping_next_id  = None   # 次の ping ラウンドの after ID
+        self._ping_graph_id = None   # グラフ更新ループの after ID
+        self._ping_canvases:   dict[str, tk.Canvas] = {}
+        self._ping_stat_vars:  dict[str, tk.StringVar] = {}
         self._load_config()
+
+        # テーマ確定後にアイコンを生成
+        palette = ICON_PALETTES.get(self._theme)
+        self._icon = tk.PhotoImage(data=_make_icon_png(palette))
+        _setup_taskbar_icon(self, palette)
         self._task_sort: dict = {"col": None, "reverse": False}
         self._conn_sort: dict = {"col": None, "reverse": False}
         self._conn_search = tk.StringVar()
@@ -1913,6 +2086,7 @@ class FolderLauncher(tk.Tk):
         self._render_tabs()
         self._render_list()
         self._check_schedule()
+        self._check_clipboard()
 
     # ── 設定読み書き（config.json に統合）─────────────────
 
@@ -1970,6 +2144,7 @@ class FolderLauncher(tk.Tk):
         # ターミナル接続設定
         self._conns = cfg.get("terminals", [])
         self._terminal_groups = cfg.get("terminal_groups", [])
+        self._bookmarks = cfg.get("bookmarks", [])
 
         # タスクデータ
         self._tasks = cfg.get("tasks", [])
@@ -1977,9 +2152,20 @@ class FolderLauncher(tk.Tk):
         # 通知アイテム
         self._notify_items = cfg.get("notifications", [])
 
+        # クリップボード履歴
+        self._clip_history = cfg.get("clipboard_history", [])
+
+        # Ping モニター
+        self._ping_hosts    = cfg.get("ping_hosts", [])
+        self._ping_interval = cfg.get("ping_interval", 5)
+
         # バナー表示設定
         self._banner_enabled_cfg: bool = cfg.get("banner_enabled", True)
         self._notify_display_sec_cfg: int = cfg.get("notify_display_sec", 8)
+
+        # テーマ設定
+        self._theme = cfg.get("theme", "lavender")
+        C.update(THEMES.get(self._theme, THEMES["lavender"]))
 
         # 旧ファイルからのマイグレーション時は config.json に保存
         if migrated:
@@ -1990,10 +2176,13 @@ class FolderLauncher(tk.Tk):
             "folders":         self._data,
             "terminals":       self._conns,
             "terminal_groups": self._terminal_groups,
+            "bookmarks":       self._bookmarks,
             "tasks":           self._tasks,
             "notifications":   self._notify_items,
             "banner_enabled":      self._banner_enabled.get() if hasattr(self, "_banner_enabled") else True,
             "notify_display_sec":  self._notify_display_sec.get() if hasattr(self, "_notify_display_sec") else 8,
+            "theme":           self._theme,
+            "clipboard_history": self._clip_history,
         }
         CONFIG_FILE.write_text(
             json.dumps(cfg, ensure_ascii=False, indent=2),
@@ -2090,6 +2279,15 @@ class FolderLauncher(tk.Tk):
                   activebackground=C["accent_lt"], activeforeground=C["text"],
                   padx=8, pady=1).pack(side="right", padx=(0, 2))
 
+        self._theme_btn = tk.Button(
+            hdr, text="Theme", font=FONT_SMALL,
+            bg=C["accent_dk"], fg=C["tab_act"],
+            activebackground=C["accent"], activeforeground=C["tab_act"],
+            relief="flat", cursor="hand2", bd=0,
+            command=self._show_theme_menu,
+        )
+        self._theme_btn.pack(side="right", padx=(0, 4), pady=3)
+
         self._show_options = tk.BooleanVar(value=False)
         tk.Checkbutton(hdr, text="Options",
                        variable=self._show_options,
@@ -2148,6 +2346,16 @@ class FolderLauncher(tk.Tk):
         )
         self._footer_btn2.pack(side="left", fill="x", expand=True, padx=(2, 0))
         _hover(self._footer_btn2, C["border"], C["accent_lt"])
+
+        # Tasksタブ専用の「Export」ボタン
+        self._footer_btn3 = tk.Button(
+            self._footer, text="Export",
+            command=self._export_tasks,
+            bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+            font=FONT_BOLD, cursor="hand2", padx=12, pady=4,
+            activebackground=C["border"], activeforeground=C["text"],
+        )
+        _hover(self._footer_btn3, C["border"], C["accent_lt"])
 
     # ── Tab bar ───────────────────────────────────────────
 
@@ -2236,6 +2444,39 @@ class FolderLauncher(tk.Tk):
         )
         notify_btn.pack(side="right")
 
+        # Web tab (left of Notify, fixed)
+        is_web = (self._active == -4)
+        web_btn = tk.Button(
+            self._tab_bar,
+            text="Web",
+            command=lambda: self._switch_tab(-4),
+            bg=C["tab_act"] if is_web else C["tab_inact"],
+            fg=C["text"] if is_web else C["text_sub"],
+            relief="flat", bd=0,
+            font=FONT_BOLD if is_web else FONT,
+            cursor="hand2", padx=10, pady=5,
+            activebackground=C["tab_act"],
+            activeforeground=C["text"],
+        )
+        web_btn.pack(side="right")
+
+        # Clip tab (left of Web, fixed)
+        is_clip = (self._active == -5)
+        clip_count = len(self._clip_history)
+        clip_label = f"Clip ({clip_count})" if clip_count else "Clip"
+        tk.Button(
+            self._tab_bar,
+            text=clip_label,
+            command=lambda: self._switch_tab(-5),
+            bg=C["tab_act"] if is_clip else C["tab_inact"],
+            fg=C["text"] if is_clip else C["text_sub"],
+            relief="flat", bd=0,
+            font=FONT_BOLD if is_clip else FONT,
+            cursor="hand2", padx=10, pady=5,
+            activebackground=C["tab_act"],
+            activeforeground=C["text"],
+        ).pack(side="right")
+
     def _switch_tab(self, idx: int):
         self._active = idx
         self._render_tabs()
@@ -2244,6 +2485,7 @@ class FolderLauncher(tk.Tk):
 
     def _update_footer(self):
         """Update footer button text/command based on active tab."""
+        self._footer_btn3.pack_forget()
         if self._active == -1:
             self._footer_btn.configure(text="+ Add Connection", command=self._add_conn)
             self._footer_btn2.pack_forget()
@@ -2251,8 +2493,16 @@ class FolderLauncher(tk.Tk):
             self._footer_btn.configure(text="+ Add Task", command=self._add_task)
             self._footer_btn2.configure(text="Gantt", command=self._open_gantt)
             self._footer_btn2.pack(side="left", fill="x", expand=True, padx=(2, 0))
+            self._footer_btn3.pack(side="left", fill="x", expand=True, padx=(2, 0))
         elif self._active == -3:
             self._footer_btn.configure(text="+ Add Notification", command=self._add_notify_item)
+            self._footer_btn2.pack_forget()
+        elif self._active == -4:
+            self._footer_btn.configure(text="+ Add Bookmark", command=self._add_bookmark)
+            self._footer_btn2.configure(text="+ Add Category", command=self._add_bm_category)
+            self._footer_btn2.pack(side="left", fill="x", expand=True, padx=(2, 0))
+        elif self._active == -5:
+            self._footer_btn.configure(text="Clear All", command=self._clear_clip_history)
             self._footer_btn2.pack_forget()
         else:
             self._footer_btn.configure(text="+ Add Folder", command=self._add_folder)
@@ -2319,6 +2569,10 @@ class FolderLauncher(tk.Tk):
             self._render_task_list()
         elif self._active == -3:
             self._render_notify_list()
+        elif self._active == -4:
+            self._render_bookmark_list()
+        elif self._active == -5:
+            self._render_clip_list()
         else:
             self._render_folder_list()
 
@@ -2880,6 +3134,303 @@ class FolderLauncher(tk.Tk):
         self._save_config()
         self._render_list()
 
+    # ── Bookmark list ─────────────────────────────────────
+
+    # ── Clipboard history ─────────────────────────────────
+
+    def _check_clipboard(self):
+        """500ms ごとにクリップボードを監視して変化があれば履歴に追加する。"""
+        try:
+            text = self.clipboard_get()
+            if text and text != self._clip_prev:
+                self._clip_prev = text
+                # 重複があれば先頭に移動
+                self._clip_history = [e for e in self._clip_history if e["text"] != text]
+                self._clip_history.insert(0, {
+                    "text": text,
+                    "ts": datetime.datetime.now().strftime("%m/%d %H:%M"),
+                })
+                # 最大件数超過分を削除
+                del self._clip_history[CLIP_MAX:]
+                self._save_config()
+                if self._active == -5:
+                    self._render_list()
+                else:
+                    self._render_tabs()   # 件数バッジだけ更新
+        except Exception:
+            pass
+        self.after(500, self._check_clipboard)
+
+    def _clear_clip_history(self):
+        if not self._clip_history:
+            return
+        if messagebox.askyesno("Clear All", "クリップボード履歴をすべて削除しますか？", parent=self):
+            self._clip_history.clear()
+            self._clip_prev = ""
+            self._save_config()
+            self._render_tabs()
+            self._render_list()
+
+    def _render_clip_list(self):
+        if not self._clip_history:
+            tk.Label(
+                self._list_frame,
+                text="クリップボード履歴はありません。\nテキストをコピーすると自動で記録されます。",
+                bg=C["bg"], fg=C["text_sub"],
+                font=FONT_SMALL, justify="center",
+            ).pack(pady=20)
+            return
+
+        for idx, entry in enumerate(self._clip_history):
+            text = entry["text"]
+            ts   = entry.get("ts", "")
+
+            card = tk.Frame(
+                self._list_frame, bg=C["card"],
+                pady=4, padx=8, relief="flat", bd=0,
+                highlightthickness=1, highlightbackground=C["border"],
+            )
+            card.pack(fill="x", pady=2, padx=2)
+
+            # 本文プレビュー（最大2行・80文字）
+            preview = text.replace("\r\n", "\n").replace("\r", "\n")
+            lines   = preview.splitlines()
+            line1   = lines[0][:80] if lines else ""
+            has_more = len(lines) > 1 or len(lines[0]) > 80 if lines else False
+            display  = line1 + ("…" if has_more else "")
+
+            left = tk.Frame(card, bg=C["card"])
+            left.pack(side="left", fill="both", expand=True)
+
+            tk.Label(left, text=display,
+                     bg=C["card"], fg=C["text"],
+                     font=FONT, anchor="w").pack(fill="x")
+            tk.Label(left, text=ts,
+                     bg=C["card"], fg=C["text_sub"],
+                     font=FONT_SMALL, anchor="w").pack(fill="x")
+
+            # 削除ボタン
+            del_btn = tk.Button(
+                card, text="✕",
+                command=lambda i=idx: self._remove_clip(i),
+                bg=C["card"], fg=C["btn_del"],
+                relief="flat", bd=0,
+                font=("Segoe UI", 11), cursor="hand2",
+                activebackground=C["card"], activeforeground=C["btn_del_h"],
+            )
+            del_btn.pack(side="right", padx=(6, 0))
+
+            # コピーボタン
+            copy_btn = tk.Button(
+                card, text="Copy",
+                command=lambda t=text: self._copy_clip(t),
+                bg=C["card"], fg=C["text_sub"],
+                relief="flat", bd=0,
+                font=FONT_SMALL, cursor="hand2",
+                activebackground=C["card"], activeforeground=C["text"],
+            )
+            copy_btn.pack(side="right", padx=(0, 2))
+
+            def _bind_card(w, t=text):
+                if w in (del_btn, copy_btn):
+                    return
+                w.bind("<Button-1>", lambda e, txt=t: self._copy_clip(txt))
+                w.bind("<Enter>",    lambda e, f=card: _set_bg(f, C["card_h"]))
+                w.bind("<Leave>",    lambda e, f=card: _set_bg(f, C["card"]))
+                w.configure(cursor="hand2")
+                for child in w.winfo_children():
+                    _bind_card(child)
+
+            _bind_card(card)
+
+    def _copy_clip(self, text: str):
+        """テキストをクリップボードにコピーする（履歴の重複追加を防ぐため _clip_prev も更新）。"""
+        self.clipboard_clear()
+        self.clipboard_append(text)
+        self._clip_prev = text
+
+    def _remove_clip(self, idx: int):
+        self._clip_history.pop(idx)
+        self._save_config()
+        self._render_tabs()
+        self._render_list()
+
+    def _render_bookmark_list(self):
+        pane = tk.Frame(self._list_frame, bg=C["bg"])
+        pane.pack(fill="both", expand=True)
+
+        if not self._bookmarks:
+            tk.Label(pane,
+                     text="No categories.\nClick \"+ Add Category\" to start.",
+                     bg=C["bg"], fg=C["text_sub"],
+                     font=FONT_SMALL, justify="center").pack(pady=20)
+            return
+
+        # 左サイドバー
+        sidebar = tk.Frame(pane, bg=C["card"], width=110,
+                           highlightthickness=1, highlightbackground=C["border"])
+        sidebar.pack(side="left", fill="y", padx=(0, 4))
+        sidebar.pack_propagate(False)
+        self._render_bm_sidebar(sidebar)
+
+        # 右メインエリア
+        main_frame = tk.Frame(pane, bg=C["bg"])
+        main_frame.pack(side="left", fill="both", expand=True)
+
+        cat = self._bookmarks[self._bm_selected]
+        items = cat.get("items", [])
+        if not items:
+            tk.Label(main_frame,
+                     text="No bookmarks.\nClick \"+ Add Bookmark\" to add one.",
+                     bg=C["bg"], fg=C["text_sub"],
+                     font=FONT_SMALL, justify="center").pack(pady=20)
+            return
+
+        for i, item in enumerate(items):
+            self._make_bookmark_card(i, item, main_frame)
+
+    def _render_bm_sidebar(self, parent: tk.Frame):
+        for i, cat in enumerate(self._bookmarks):
+            is_active = (i == self._bm_selected)
+            bg_c = C["accent"] if is_active else C["card"]
+            fg_c = "white" if is_active else C["text_sub"]
+            b = tk.Button(parent, text=cat["category"],
+                          command=lambda idx=i: self._bm_select(idx),
+                          bg=bg_c, fg=fg_c,
+                          relief="flat", bd=0, font=FONT_SMALL,
+                          cursor="hand2", anchor="w", padx=6,
+                          activebackground=C["card_h"],
+                          activeforeground=C["text"],
+                          wraplength=100, justify="left")
+            b.pack(fill="x", pady=1, padx=2)
+            if not is_active:
+                _hover(b, C["card_h"], C["card"])
+            menu = tk.Menu(parent, tearoff=0)
+            menu.add_command(label="Rename",
+                             command=lambda idx=i: self._rename_bm_category(idx))
+            menu.add_command(label="Delete",
+                             command=lambda idx=i: self._delete_bm_category(idx))
+            b.bind("<Button-3>", lambda e, m=menu: m.tk_popup(e.x_root, e.y_root))
+
+        add_btn = tk.Button(parent, text="+ Add Category",
+                            command=self._add_bm_category,
+                            bg=C["bg"], fg=C["text_sub"],
+                            relief="flat", bd=0, font=FONT_SMALL,
+                            cursor="hand2", anchor="w", padx=6,
+                            activebackground=C["card_h"],
+                            activeforeground=C["text"],
+                            wraplength=100, justify="left")
+        add_btn.pack(fill="x", pady=(8, 1), padx=2)
+        _hover(add_btn, C["card_h"], C["bg"])
+
+    def _bm_select(self, idx: int):
+        self._bm_selected = idx
+        self._render_list()
+
+    def _make_bookmark_card(self, item_idx: int, item: dict,
+                            parent_frame: tk.Frame):
+        card = tk.Frame(parent_frame, bg=C["card"],
+                        pady=4, padx=8, relief="flat", bd=0,
+                        highlightthickness=1, highlightbackground=C["border"])
+        card.pack(fill="x", pady=2, padx=2)
+
+        left = tk.Frame(card, bg=C["card"])
+        left.pack(side="left", fill="both", expand=True)
+
+        tk.Label(left, text=f"  {item['name']}",
+                 bg=C["card"], fg=C["text"],
+                 font=FONT_BOLD, anchor="w").pack(fill="x")
+        tk.Label(left, text=f"  {item['url']}",
+                 bg=C["card"], fg=C["accent"],
+                 font=FONT_SMALL, anchor="w").pack(fill="x")
+
+        del_btn = tk.Button(card, text="✕",
+                            command=lambda i=item_idx: self._remove_bookmark(i),
+                            bg=C["card"], fg=C["btn_del"],
+                            relief="flat", bd=0,
+                            font=("Segoe UI", 11), cursor="hand2",
+                            activebackground=C["card"], activeforeground=C["btn_del_h"])
+        del_btn.pack(side="right", padx=(6, 0))
+
+        edit_btn = tk.Button(card, text="Edit",
+                             command=lambda i=item_idx: self._edit_bookmark(i),
+                             bg=C["card"], fg=C["text_sub"],
+                             relief="flat", bd=0,
+                             font=FONT_SMALL, cursor="hand2",
+                             activebackground=C["card"], activeforeground=C["text"])
+        edit_btn.pack(side="right", padx=(0, 2))
+
+        def _open(e=None):
+            webbrowser.open(item["url"])
+
+        for w in (card, left) + tuple(left.winfo_children()):
+            w.bind("<Button-1>", _open)
+            w.bind("<Enter>", lambda e, f=card: _set_bg(f, C["card_h"]))
+            w.bind("<Leave>", lambda e, f=card: _set_bg(f, C["card"]))
+            w.configure(cursor="hand2")
+
+    # ── Bookmark operations ───────────────────────────────
+
+    def _add_bookmark(self):
+        if not self._bookmarks:
+            messagebox.showinfo("Info", "Add a category first.", parent=self)
+            return
+        dlg = BookmarkDialog(self)
+        if dlg.result is None:
+            return
+        self._bookmarks[self._bm_selected]["items"].append(dlg.result)
+        self._save_config()
+        self._render_list()
+
+    def _edit_bookmark(self, item_idx: int):
+        item = self._bookmarks[self._bm_selected]["items"][item_idx]
+        dlg = BookmarkDialog(self, initial=item)
+        if dlg.result is None:
+            return
+        self._bookmarks[self._bm_selected]["items"][item_idx] = dlg.result
+        self._save_config()
+        self._render_list()
+
+    def _remove_bookmark(self, item_idx: int):
+        name = self._bookmarks[self._bm_selected]["items"][item_idx]["name"]
+        if messagebox.askyesno("Remove", f'Remove "{name}"?', parent=self):
+            self._bookmarks[self._bm_selected]["items"].pop(item_idx)
+            self._save_config()
+            self._render_list()
+
+    def _add_bm_category(self):
+        name = simpledialog.askstring("Add Category", "Category name:", parent=self)
+        if not name:
+            return
+        name = name.strip()
+        if not name:
+            return
+        self._bookmarks.append({"category": name, "items": []})
+        self._bm_selected = len(self._bookmarks) - 1
+        self._save_config()
+        self._render_list()
+
+    def _rename_bm_category(self, idx: int):
+        old = self._bookmarks[idx]["category"]
+        new = simpledialog.askstring("Rename Category", "New name:",
+                                     initialvalue=old, parent=self)
+        if not new or not new.strip() or new.strip() == old:
+            return
+        self._bookmarks[idx]["category"] = new.strip()
+        self._save_config()
+        self._render_list()
+
+    def _delete_bm_category(self, idx: int):
+        name = self._bookmarks[idx]["category"]
+        if not messagebox.askyesno("Delete Category",
+                                   f'Delete category "{name}" and all its bookmarks?',
+                                   parent=self):
+            return
+        self._bookmarks.pop(idx)
+        self._bm_selected = max(0, min(self._bm_selected, len(self._bookmarks) - 1))
+        self._save_config()
+        self._render_list()
+
     # ── Task list ─────────────────────────────────────────
 
     def _render_task_list(self):
@@ -3239,6 +3790,100 @@ class FolderLauncher(tk.Tk):
     def _open_gantt(self):
         GanttWindow(self, self._tasks)
 
+    def _export_tasks(self):
+        """タスク一覧をテキストファイルに出力してエクスプローラーで開く。"""
+        if not self._tasks:
+            messagebox.showinfo("Export", "タスクが登録されていません。", parent=self)
+            return
+
+        save_path = filedialog.asksaveasfilename(
+            parent=self,
+            title="タスクをエクスポート",
+            defaultextension=".txt",
+            initialfile=f"tasks_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+            filetypes=[("テキストファイル", "*.txt"), ("すべてのファイル", "*.*")],
+        )
+        if not save_path:
+            return
+
+        today = datetime.date.today()
+
+        def days_left(dl_str: str) -> str:
+            if not dl_str:
+                return ""
+            try:
+                d = datetime.date.fromisoformat(dl_str)
+                delta = (d - today).days
+                if delta > 0:  return f"あと {delta} 日"
+                if delta == 0: return "今日が締切"
+                return f"{abs(delta)} 日超過"
+            except ValueError:
+                return ""
+
+        # イベントでグループ化（順序保持）
+        groups: dict[str, list[dict]] = {}
+        for task in self._tasks:
+            groups.setdefault(task["event"], []).append(task)
+
+        total = len(self._tasks)
+        done  = sum(1 for t in self._tasks if t.get("progress", 0) == 100)
+        avg   = sum(t.get("progress", 0) for t in self._tasks) // total if total else 0
+
+        lines: list[str] = []
+        SEP2 = "-" * 50
+
+        for event_name, task_list in groups.items():
+            lines.append("")
+            ev_done = sum(1 for t in task_list if t.get("progress", 0) == 100)
+            lines.append(f"■ {event_name}  （{ev_done}/{len(task_list)} 完了）")
+            lines.append(SEP2)
+
+            for task in task_list:
+                pct      = task.get("progress", 0)
+                process  = task.get("process", "（プロセス名なし）")
+                content  = task.get("content", "").strip()
+                deadline = task.get("deadline", "")
+                updated  = task.get("updated", "")
+                wfs      = task.get("work_folders", [])
+                if not wfs and task.get("work_folder"):
+                    wfs = [task["work_folder"]]
+                memos = task.get("memos", [])
+                if not memos and task.get("memo"):
+                    memos = [{"title": "Memo", "content": task["memo"]}]
+
+                # 進捗バー（20文字幅）
+                bar_filled = int(pct / 5)
+                bar = "█" * bar_filled + "░" * (20 - bar_filled)
+
+                lines.append(f"  ▶ {process}")
+                lines.append(f"    進捗   : [{bar}] {pct}%")
+
+                if deadline:
+                    dl_note = days_left(deadline)
+                    lines.append(f"    締切   : {deadline}  {dl_note}")
+                if updated:
+                    lines.append(f"    更新   : {updated}")
+                if content:
+                    # 内容は折り返して表示（60文字ごと）
+                    for line in content.splitlines():
+                        if line.strip():
+                            lines.append(f"    内容   : {line}")
+                if wfs:
+                    for wf in wfs:
+                        lines.append(f"    フォルダ: {wf}")
+                if memos:
+                    for memo in memos:
+                        m_title   = memo.get("title", "Untitled")
+                        m_content = memo.get("content", "").strip()
+                        lines.append(f"    メモ [{m_title}]")
+                        for ml in m_content.splitlines():
+                            if ml.strip():
+                                lines.append(f"      {ml}")
+                lines.append("")
+
+        Path(save_path).write_text("\n".join(lines), encoding="utf-8-sig")
+        subprocess.Popen(["notepad", save_path])
+
     def _open_memo(self, task_idx: int):
         """タスクのメモ一覧・編集ウィンドウ（複数メモ対応）"""
         task = self._tasks[task_idx]
@@ -3588,12 +4233,54 @@ class FolderLauncher(tk.Tk):
             self._render_list()
             self._update_banner()
 
+    # ── Theme ─────────────────────────────────────────────
+
+    def _show_theme_menu(self):
+        menu = tk.Menu(self, tearoff=0)
+        labels = {"lavender": "Lavender", "dark": "Dark", "light": "Light", "gemini": "Gemini", "claude": "Claude", "devil": "Devil"}
+        for key, label in labels.items():
+            prefix = "✓ " if self._theme == key else "  "
+            menu.add_command(
+                label=prefix + label,
+                command=lambda k=key: self._apply_theme(k),
+            )
+        btn = self._theme_btn
+        menu.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() + btn.winfo_height())
+
+    def _apply_theme(self, theme_name: str):
+        if theme_name not in THEMES:
+            return
+        self._theme = theme_name
+        C.update(THEMES[theme_name])
+        self._save_config()
+
+        # _tick() の after ループをキャンセル（二重ループ防止）
+        if self._tick_id is not None:
+            self.after_cancel(self._tick_id)
+            self._tick_id = None
+
+        # アイコンをテーマカラーで再生成
+        palette = ICON_PALETTES.get(theme_name)
+        png_b64 = _make_icon_png(palette)
+        self._icon = tk.PhotoImage(data=png_b64)
+        self.wm_iconphoto(True, self._icon)
+        _setup_taskbar_icon(self, palette)
+
+        # 全ウィジェットを破棄して再構築
+        for w in self.winfo_children():
+            w.destroy()
+        self.configure(bg=C["bg"])
+
+        self._build_ui()
+        self._render_tabs()
+        self._render_list()
+
     # ── Other ─────────────────────────────────────────────
 
     def _tick(self):
         self._clock_var.set(datetime.datetime.now().strftime("%H:%M:%S"))
         self._update_banner()
-        self.after(1000, self._tick)
+        self._tick_id = self.after(1000, self._tick)
 
     def _update_banner(self):
         """次の通知をバナーラベルに表示する。"""
