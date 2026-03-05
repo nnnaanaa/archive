@@ -23,7 +23,8 @@ import calendar
 import webbrowser
 from ctypes import wintypes
 from pathlib import Path
-from PIL import ImageGrab
+from PIL import ImageGrab, Image
+import pystray
 
 CONFIG_FILE   = Path(__file__).parent / "config.json"
 LOG_DIR       = Path(__file__).parent / "logs"
@@ -46,7 +47,7 @@ C = {
 }
 
 THEMES: dict[str, dict] = {
-    "lavender": {   # デフォルト（既存 C と同値）
+    "violet": {   # デフォルト（既存 C と同値）
         "bg": "#EDE8F5", "card": "#F5F2FC", "card_h": "#DDD4F4",
         "accent": "#8B7CC8", "accent_dk": "#6A5BAA", "accent_lt": "#C4B8E8",
         "text": "#3A2D6E", "text_sub": "#7B6DB0", "border": "#C0B0E0",
@@ -81,17 +82,73 @@ THEMES: dict[str, dict] = {
         "tab_act": "#242424", "tab_inact": "#1E1E1E",
         "btn_del": "#8B3A3A", "btn_del_h": "#B04848",
     },
-    "devil": {   # 小悪魔：漆黒＋クリムゾンレッド
+    "scarlet": {   # 小悪魔：漆黒＋クリムゾンレッド
         "bg": "#1A0A0E", "card": "#240F14", "card_h": "#331520",
         "accent": "#CC2244", "accent_dk": "#991833", "accent_lt": "#E06078",
         "text": "#F5E8EA", "text_sub": "#C09098", "border": "#4A1A25",
         "tab_act": "#240F14", "tab_inact": "#1E0B10",
         "btn_del": "#882030", "btn_del_h": "#BB3045",
     },
+    "ocean": {   # 深海ブルー
+        "bg": "#0D1B2A", "card": "#1A2940", "card_h": "#243550",
+        "accent": "#2196C4", "accent_dk": "#1570A0", "accent_lt": "#5BB8D4",
+        "text": "#C8E8F5", "text_sub": "#7AAFC8", "border": "#2A4060",
+        "tab_act": "#1A2940", "tab_inact": "#152030",
+        "btn_del": "#8B3A3A", "btn_del_h": "#B04848",
+    },
+    "rose": {   # ローズピンク
+        "bg": "#FDF0F3", "card": "#FFFFFF", "card_h": "#FFE4EC",
+        "accent": "#E0608A", "accent_dk": "#C0407A", "accent_lt": "#F0A0BC",
+        "text": "#4A1A2A", "text_sub": "#A06080", "border": "#F0C0D0",
+        "tab_act": "#FFFFFF", "tab_inact": "#FAE0E8",
+        "btn_del": "#E06080", "btn_del_h": "#C04060",
+    },
+    "mint": {   # ミントグリーン
+        "bg": "#F0FAF5", "card": "#FFFFFF", "card_h": "#D8F5E8",
+        "accent": "#3DAA78", "accent_dk": "#2A8A60", "accent_lt": "#80CCA8",
+        "text": "#1A3A28", "text_sub": "#5A8A70", "border": "#B0E0C8",
+        "tab_act": "#FFFFFF", "tab_inact": "#E0F5EC",
+        "btn_del": "#C06060", "btn_del_h": "#A04040",
+    },
+    "peach": {   # ピーチ：暖かみのあるオレンジ〜ピンクパステル
+        "bg": "#FFF5EE", "card": "#FFFAF7", "card_h": "#FFE8D8",
+        "accent": "#E8845A", "accent_dk": "#C86030", "accent_lt": "#F5C0A0",
+        "text": "#4A2010", "text_sub": "#A06848", "border": "#F5D0B8",
+        "tab_act": "#FFFAF7", "tab_inact": "#FFE8D8",
+        "btn_del": "#D05050", "btn_del_h": "#A83030",
+    },
+    "sky": {   # スカイブルー：さわやかな水色パステル
+        "bg": "#EEF7FF", "card": "#F5FBFF", "card_h": "#D4EDFF",
+        "accent": "#4DA8DA", "accent_dk": "#2A88BE", "accent_lt": "#9DD4F0",
+        "text": "#0C2C44", "text_sub": "#4A80A8", "border": "#B0D8F0",
+        "tab_act": "#F5FBFF", "tab_inact": "#DCF0FF",
+        "btn_del": "#C05870", "btn_del_h": "#A03858",
+    },
+    "lemon": {   # レモン：明るく元気なイエローパステル
+        "bg": "#FDFCE8", "card": "#FFFFF0", "card_h": "#F5F0B8",
+        "accent": "#C8A800", "accent_dk": "#A08800", "accent_lt": "#E8D870",
+        "text": "#383000", "text_sub": "#787040", "border": "#E8DC90",
+        "tab_act": "#FFFFF0", "tab_inact": "#F5EEC0",
+        "btn_del": "#C06040", "btn_del_h": "#A04020",
+    },
+    "lavender": {   # ラベンダー：やさしい紫パステル（violetより淡め）
+        "bg": "#F3F0FF", "card": "#FAF8FF", "card_h": "#E4DEFF",
+        "accent": "#9B88D8", "accent_dk": "#7A66C0", "accent_lt": "#C8BCEE",
+        "text": "#2E2460", "text_sub": "#7868B0", "border": "#D0C8F0",
+        "tab_act": "#FAF8FF", "tab_inact": "#E8E0FF",
+        "btn_del": "#C888B0", "btn_del_h": "#A86898",
+    },
+    "sakura": {   # サクラ：桜色の淡いピンク
+        "bg": "#FFF0F5", "card": "#FFF8FA", "card_h": "#FFD8E8",
+        "accent": "#E87898", "accent_dk": "#C85878", "accent_lt": "#F5B0C8",
+        "text": "#4A1828", "text_sub": "#A06888", "border": "#F0C0D4",
+        "tab_act": "#FFF8FA", "tab_inact": "#FFE0EC",
+        "btn_del": "#D05878", "btn_del_h": "#B03858",
+    },
 }
 
 ICON_PALETTES: dict[str, dict] = {
-    "lavender": {
+    "violet": {
         "BDR": ( 42,  32,  88, 255), "HL": (222, 213, 243, 255),
         "LT":  (178, 165, 220, 255), "F":  (128, 112, 190, 255),
         "MD":  ( 98,  82, 155, 255), "DK": ( 58,  46, 108, 255),
@@ -121,11 +178,59 @@ ICON_PALETTES: dict[str, dict] = {
         "MD":  (184,  92,  60, 255), "DK": (115,  52,  28, 255),
         "SP":  (235, 165, 130, 200),
     },
-    "devil": {
+    "scarlet": {
         "BDR": ( 60,   8,  15, 255), "HL": (240, 160, 175, 255),
         "LT":  (210,  90, 115, 255), "F":  (180,  28,  60, 255),
         "MD":  (130,  18,  42, 255), "DK": ( 75,   8,  22, 255),
         "SP":  (220, 100, 120, 200),
+    },
+    "ocean": {
+        "BDR": (  8,  30,  55, 255), "HL": ( 91, 184, 212, 255),
+        "LT":  ( 55, 150, 195, 255), "F":  ( 33, 150, 196, 255),
+        "MD":  ( 21, 112, 160, 255), "DK": ( 10,  65, 105, 255),
+        "SP":  (100, 200, 230, 200),
+    },
+    "rose": {
+        "BDR": ( 90,  20,  45, 255), "HL": (245, 185, 210, 255),
+        "LT":  (235, 150, 185, 255), "F":  (224,  96, 138, 255),
+        "MD":  (192,  64, 122, 255), "DK": (130,  30,  80, 255),
+        "SP":  (250, 190, 215, 210),
+    },
+    "mint": {
+        "BDR": ( 18,  65,  42, 255), "HL": (155, 220, 190, 255),
+        "LT":  (105, 195, 155, 255), "F":  ( 61, 170, 120, 255),
+        "MD":  ( 42, 138,  96, 255), "DK": ( 22,  88,  60, 255),
+        "SP":  (140, 215, 175, 210),
+    },
+    "peach": {
+        "BDR": (120,  50,  20, 255), "HL": (250, 210, 185, 255),
+        "LT":  (240, 175, 145, 255), "F":  (232, 132,  90, 255),
+        "MD":  (200,  96,  48, 255), "DK": (140,  55,  22, 255),
+        "SP":  (248, 200, 170, 210),
+    },
+    "sky": {
+        "BDR": ( 12,  50,  90, 255), "HL": (157, 212, 245, 255),
+        "LT":  (100, 185, 230, 255), "F":  ( 77, 168, 218, 255),
+        "MD":  ( 42, 136, 190, 255), "DK": ( 18,  90, 140, 255),
+        "SP":  (155, 215, 248, 210),
+    },
+    "lemon": {
+        "BDR": ( 90,  75,   0, 255), "HL": (245, 235, 130, 255),
+        "LT":  (228, 210,  80, 255), "F":  (200, 168,   0, 255),
+        "MD":  (160, 136,   0, 255), "DK": (100,  85,   0, 255),
+        "SP":  (242, 232, 120, 210),
+    },
+    "lavender": {
+        "BDR": ( 46,  36, 100, 255), "HL": (210, 200, 245, 255),
+        "LT":  (185, 172, 232, 255), "F":  (155, 136, 216, 255),
+        "MD":  (122, 102, 192, 255), "DK": ( 78,  62, 145, 255),
+        "SP":  (210, 200, 245, 210),
+    },
+    "sakura": {
+        "BDR": ( 95,  30,  55, 255), "HL": (252, 195, 218, 255),
+        "LT":  (242, 165, 195, 255), "F":  (232, 120, 152, 255),
+        "MD":  (200,  88, 120, 255), "DK": (140,  45,  80, 255),
+        "SP":  (250, 195, 220, 210),
     },
 }
 
@@ -149,7 +254,7 @@ def _fmt_duration(seconds: float) -> str:
 
 def _make_icon_png(palette: dict | None = None) -> str:
     """輪郭線付きクラゲアイコン PNG を生成して Base64 返却する。"""
-    p = palette or ICON_PALETTES["lavender"]
+    p = palette or ICON_PALETTES["violet"]
     W, H = 32, 32
     T   = (  0,   0,   0,   0)  # transparent
     BDR = p["BDR"]               # dark outline
@@ -526,7 +631,7 @@ class ConnectionDialog(tk.Toplevel):
         self._host_lbl, _ = self._row("Host",     2, self._host)
         self._port_lbl, self._port_entry = self._row("Port", 3, self._port, width=8)
         self._row("Username", 4, self._user)
-        _, self._pw_entry = self._row("Password", 5, self._pw, show="●")
+        _, self._pw_entry = self._row("Password", 5, self._pw, show="*")
         self._show_pw = False
         self._pw_toggle = tk.Button(
             self._form, text="show", font=("Segoe UI", 8),
@@ -616,7 +721,7 @@ class ConnectionDialog(tk.Toplevel):
 
     def _toggle_pw(self):
         self._show_pw = not self._show_pw
-        self._pw_entry.config(show="" if self._show_pw else "●")
+        self._pw_entry.config(show="" if self._show_pw else "*")
         self._pw_toggle.config(
             text="hide" if self._show_pw else "show",
             fg=C["accent"] if self._show_pw else C["text_sub"],
@@ -752,6 +857,7 @@ class TaskDialog(tk.Toplevel):
         self._event_var    = tk.StringVar(value=d.get("event", ""))
         self._process_var  = tk.StringVar(value=d.get("process", ""))
         self._progress_var = tk.IntVar(value=d.get("progress", 0))
+        self._recur_var    = tk.StringVar(value=d.get("recur", "none"))
         self._init_content = d.get("content", "")
         _wf = d.get("work_folders", [])
         if not _wf and d.get("work_folder"):
@@ -909,6 +1015,19 @@ class TaskDialog(tk.Toplevel):
         tk.Button(wf_btn_col, text="+ Add",  command=self._add_work_folder,    **_wf_btn_cfg).pack(fill="x", pady=(0, 2))
         tk.Button(wf_btn_col, text="Remove", command=self._remove_work_folder, **_wf_btn_cfg).pack(fill="x")
 
+        # Recur row
+        tk.Label(self._form, text="Recur", bg=C["bg"], fg=C["text_sub"],
+                 font=FONT_SMALL, anchor="e", width=9).grid(
+                     row=6, column=0, padx=(12, 4), pady=3, sticky="e")
+        recur_frame = tk.Frame(self._form, bg=C["bg"])
+        recur_frame.grid(row=6, column=1, padx=(0, 12), pady=3, sticky="w")
+        for val, lbl in [("none", "None"), ("daily", "Daily"), ("weekly", "Weekly"),
+                         ("biweekly", "Biweekly"), ("monthly", "Monthly"), ("yearly", "Yearly")]:
+            tk.Radiobutton(recur_frame, text=lbl, variable=self._recur_var, value=val,
+                           bg=C["bg"], fg=C["text"], selectcolor=C["bg"],
+                           activebackground=C["bg"], font=FONT_SMALL,
+                           cursor="hand2").pack(side="left", padx=(0, 6))
+
         btn_frame = tk.Frame(self, bg=C["bg"])
         btn_frame.pack(fill="x", padx=16, pady=(4, 14))
         tk.Button(btn_frame, text="Save", command=self._ok,
@@ -958,12 +1077,13 @@ class TaskDialog(tk.Toplevel):
                 messagebox.showwarning("Input Error", f"Invalid deadline:\n{e}", parent=self)
                 return
         self.result = {
-            "event":       self._event_var.get().strip(),
-            "process":     self._process_var.get().strip(),
-            "content":     self._content_text.get("1.0", "end").strip(),
-            "progress":    self._progress_var.get(),
-            "deadline":    deadline,
+            "event":        self._event_var.get().strip(),
+            "process":      self._process_var.get().strip(),
+            "content":      self._content_text.get("1.0", "end").strip(),
+            "progress":     self._progress_var.get(),
+            "deadline":     deadline,
             "work_folders": list(self._work_folders_list),
+            "recur":        self._recur_var.get(),
         }
         self.destroy()
 
@@ -1108,7 +1228,7 @@ class GanttWindow(tk.Toplevel):
         for event_name, task_list in groups.items():
             # イベントヘッダー行
             cv.create_rectangle(0, y, cw, y + ROW_H, fill=C["accent_lt"], outline="")
-            cv.create_text(10, y + ROW_H // 2, text=f"▶  {event_name}",
+            cv.create_text(10, y + ROW_H // 2, text=f"> {event_name}",
                            fill=C["accent_dk"], font=FONT_BOLD, anchor="w")
             cv.create_line(0, y + ROW_H, cw, y + ROW_H, fill=C["border"])
             y += ROW_H
@@ -2497,15 +2617,17 @@ class FolderLauncher(tk.Tk):
 
     # システムタブ定義 (key, 表示名, _active値)
     _SYSTEM_TABS = [
-        ("dashboard", "Home",     -8),
-        ("auto",      "Auto",     -9),
-        ("terminal", "Terminal", -1),
-        ("tasks",    "Tasks",    -2),
-        ("notify",   "Notify",   -3),
-        ("web",      "Web",      -4),
-        ("clip",     "Clip",     -5),
-        ("ping",     "Ping",     -6),
-        ("memo",     "Memo",     -7),
+        ("dashboard", "Home",      -8),
+        ("auto",      "Auto",      -9),
+        ("terminal",  "Terminal",  -1),
+        ("tasks",     "Tasks",     -2),
+        ("pomodoro",  "Pomodoro", -10),
+        ("calendar",  "Calendar", -11),
+        ("notify",    "Notify",    -3),
+        ("web",       "Web",       -4),
+        ("clip",      "Clip",      -5),
+        ("ping",      "Ping",      -6),
+        ("memo",      "Memo",      -7),
     ]
     _DEFAULT_PINS = ["dashboard", "terminal", "tasks", "notify"]
 
@@ -2542,10 +2664,13 @@ class FolderLauncher(tk.Tk):
         self._memos: list[dict] = []   # {"title": str, "body": str}
         self._memo_sel: int | None = None
         self._work_active: dict | None = None  # {"task_idx": int, "start": datetime}
+        self._sleep_win: tk.Toplevel | None = None
+        self._sleep_tick_id = None
+        self._tray_icon: pystray.Icon | None = None
         self._work_anim_id = None
         self._work_anim_dots = 0
         self._work_bar_lbl: tk.Label | None = None
-        self._theme: str = "lavender"   # _load_config() で上書きされる
+        self._theme: str = "violet"   # _load_config() で上書きされる
         self._tick_id = None             # _tick() の after ID（再構築時のキャンセル用）
         self._clip_history: list[dict] = []   # {"text": str, "ts": str}
         self._clip_prev: str = ""             # 前回クリップボード値（変化検知用）
@@ -2568,6 +2693,27 @@ class FolderLauncher(tk.Tk):
         self._conn_ping_cache:   dict[str, str | None] = {}  # host -> "ok"|"fail"|None
         self._conn_ping_dots:    dict[str, list]        = {}  # host -> [Canvas, ...]
         self._conn_ping_running: set[str]               = set()   # ダッシュボード自動リフレッシュの after ID
+        self._conn_ping_enabled: bool = True   # Terminal ping ドット ON/OFF
+        # Pomodoro
+        self._pomo_state: str = "idle"   # idle/work/break/long_break/paused
+        self._pomo_paused_state: str = "work"  # 一時停止前の状態
+        self._pomo_remaining: int = 25 * 60   # 残り秒数
+        self._pomo_cycle: int = 0             # 完了したポモドーロ数
+        self._pomo_session: int = 0           # 合計セッション数
+        self._pomo_after_id = None            # after() ID
+        self._pomo_work_min: int = 25
+        self._pomo_break_min: int = 5
+        self._pomo_long_break_min: int = 15
+        self._pomo_task_idx: int | None = None  # リンクしているタスクのindex
+        self._pomo_lbl_time: tk.Label | None = None
+        self._pomo_lbl_state: tk.Label | None = None
+        self._pomo_lbl_cycle: tk.Label | None = None
+        self._pomo_canvas: tk.Canvas | None = None
+        # Calendar
+        _today = datetime.date.today()
+        self._cal_year:    int = _today.year
+        self._cal_month:   int = _today.month
+        self._cal_sel_day: int | None = None
         self._load_config()
 
         # テーマ確定後にアイコンを生成
@@ -2575,6 +2721,7 @@ class FolderLauncher(tk.Tk):
         self._icon = tk.PhotoImage(data=_make_icon_png(palette))
         _setup_taskbar_icon(self, palette)
         self._task_sort: dict = {"col": None, "reverse": False}
+        self._task_view: str = "list"  # "list" or "kanban"
         self._conn_sort: dict = {"col": None, "reverse": False}
         self._conn_search = tk.StringVar()
         self._conn_search.trace_add(
@@ -2591,6 +2738,8 @@ class FolderLauncher(tk.Tk):
         self._check_schedule()
         self._check_clipboard()
         self.after(30_000, self._check_rules)
+        self.after(600, self._show_startup_summary)
+        self._check_recurring_tasks()
 
     # ── 設定読み書き（config.json に統合）─────────────────
 
@@ -2621,6 +2770,9 @@ class FolderLauncher(tk.Tk):
                 self._data = [{"category": "General", "folders": []}]
                 self._banner_enabled_cfg = True
                 self._notify_display_sec_cfg = 8
+                self._topmost_cfg = False
+                self._alpha_cfg = 1.0
+                self._card_size = "normal"
                 return
             migrated = True  # マイグレーション成功
         else:
@@ -2663,8 +2815,9 @@ class FolderLauncher(tk.Tk):
         self._ping_hosts    = cfg.get("ping_hosts", [])
         self._ping_interval = cfg.get("ping_interval", 5)
         self._ping_enabled  = cfg.get("ping_enabled", True)
+        self._conn_ping_enabled = cfg.get("conn_ping_enabled", True)
 
-        # メモパッド
+        # Memo pad
         self._memos = cfg.get("memos", [])
 
         # タブピン留め設定
@@ -2676,10 +2829,13 @@ class FolderLauncher(tk.Tk):
         # バナー表示設定
         self._banner_enabled_cfg: bool = cfg.get("banner_enabled", True)
         self._notify_display_sec_cfg: int = cfg.get("notify_display_sec", 8)
+        self._topmost_cfg: bool = cfg.get("topmost", False)
+        self._alpha_cfg: float = float(cfg.get("alpha", 1.0))
+        self._card_size: str = cfg.get("card_size", "normal")
 
         # テーマ設定
-        self._theme = cfg.get("theme", "lavender")
-        C.update(THEMES.get(self._theme, THEMES["lavender"]))
+        self._theme = cfg.get("theme", "violet")
+        C.update(THEMES.get(self._theme, THEMES["violet"]))
 
         # 旧ファイルからのマイグレーション時は config.json に保存
         if migrated:
@@ -2697,9 +2853,13 @@ class FolderLauncher(tk.Tk):
             "notify_display_sec":  self._notify_display_sec.get() if hasattr(self, "_notify_display_sec") else 8,
             "theme":           self._theme,
             "clipboard_history": self._clip_history,
-            "ping_hosts":    self._ping_hosts,
-            "ping_interval": self._ping_interval,
-            "ping_enabled":  self._ping_enabled,
+            "ping_hosts":      self._ping_hosts,
+            "ping_interval":   self._ping_interval,
+            "ping_enabled":    self._ping_enabled,
+            "conn_ping_enabled": self._conn_ping_enabled,
+            "topmost":         self.attributes("-topmost"),
+            "alpha":           self.attributes("-alpha"),
+            "card_size":       self._card_size,
             "memos":         self._memos,
             "pinned_tabs":   self._pinned_tabs,
             "rules":         self._rules,
@@ -2732,6 +2892,7 @@ class FolderLauncher(tk.Tk):
         hdr = tk.Frame(self, bg=C["accent"], height=30)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
+
         tk.Label(hdr, text="Gem",
                  bg=C["accent"], fg="white", font=FONT_BOLD,
                  ).pack(side="left", padx=8, pady=4)
@@ -2741,7 +2902,7 @@ class FolderLauncher(tk.Tk):
                  bg=C["accent"], fg=C["accent_lt"],
                  font=("Consolas", 9)).pack(side="left", padx=6)
 
-        # バナー通知ラベル（時計の右）
+        # Banner notification label
         self._banner_lbl = tk.Label(
             hdr, text="",
             bg=C["accent_dk"], fg="white",
@@ -2749,73 +2910,122 @@ class FolderLauncher(tk.Tk):
         )
         self._banner_lbl.pack(side="left", padx=(4, 0))
 
-        # Banner トグル（_tick() より先に作成する）
+        # Setup vars (must be before _tick())
         self._banner_enabled = tk.BooleanVar(value=self._banner_enabled_cfg)
         self._banner_enabled.trace_add("write", lambda *_: (self._update_banner(), self._save_config()))
         self._notify_display_sec = tk.IntVar(value=self._notify_display_sec_cfg)
         self._notify_display_sec.trace_add("write", lambda *_: self._save_config())
+        self.attributes("-topmost", self._topmost_cfg)
+        self.attributes("-alpha", self._alpha_cfg)
+        self._show_options = tk.BooleanVar(value=False)
 
         self._tick()
-        def _toggle_banner():
-            self._banner_enabled.set(not self._banner_enabled.get())
-            _banner_btn.configure(
-                text="Banner ✓" if self._banner_enabled.get() else "Banner",
-                bg=C["accent_dk"] if self._banner_enabled.get() else C["accent"],
-            )
-        _banner_btn = tk.Button(
-            hdr, text="Banner ✓" if self._banner_enabled_cfg else "Banner",
-            command=_toggle_banner,
-            bg=C["accent_dk"] if self._banner_enabled_cfg else C["accent"],
-            fg="white", relief="flat", bd=0, font=FONT_SMALL,
-            activebackground=C["accent_lt"], activeforeground=C["text"],
-            cursor="hand2",
-        )
-        _banner_btn.pack(side="right", padx=(0, 2))
 
-        # 通知表示時間 Spinbox
-        _sec_frame = tk.Frame(hdr, bg=C["accent"])
-        _sec_frame.pack(side="right", padx=(0, 4))
-        tk.Label(_sec_frame, text="Notify sec",
-                 bg=C["accent"], fg=C["accent_lt"],
-                 font=FONT_SMALL).pack(side="left")
-        tk.Spinbox(_sec_frame, textvariable=self._notify_display_sec,
-                   from_=3, to=60, width=3,
-                   bg=C["accent_dk"], fg="white",
-                   relief="flat", bd=0, font=FONT_SMALL,
-                   buttonbackground=C["accent_dk"],
-                   ).pack(side="left", padx=(2, 0))
+        _btn_cfg = dict(bg=C["accent_dk"], fg="white", relief="flat", bd=0,
+                        font=FONT_SMALL, cursor="hand2",
+                        activebackground=C["accent_lt"], activeforeground=C["text"],
+                        padx=8, pady=1)
 
-        tk.Button(hdr, text="Screenshot",
-                  command=self._open_screenshot,
-                  bg=C["accent_dk"], fg="white", relief="flat", bd=0,
-                  font=FONT, cursor="hand2",
-                  activebackground=C["accent_lt"], activeforeground=C["text"],
-                  padx=8, pady=1).pack(side="right", padx=(0, 6))
+        # ⚙ Settings menu (rightmost)
+        def _show_settings():
+            m = tk.Menu(self, tearoff=0,
+                        bg=C["card"], fg=C["text"],
+                        activebackground=C["card_h"], activeforeground=C["text"],
+                        relief="flat", font=FONT_SMALL)
 
-        tk.Button(hdr, text="Record",
-                  command=self._open_recording,
-                  bg=C["accent_dk"], fg="white", relief="flat", bd=0,
-                  font=FONT, cursor="hand2",
-                  activebackground=C["accent_lt"], activeforeground=C["text"],
-                  padx=8, pady=1).pack(side="right", padx=(0, 2))
+            # Theme submenu
+            theme_sub = tk.Menu(m, tearoff=0,
+                                bg=C["card"], fg=C["text"],
+                                activebackground=C["card_h"], activeforeground=C["text"],
+                                relief="flat", font=FONT_SMALL)
+            for key, label in [("violet","Violet"),("dark","Dark"),("light","Light"),
+                                ("gemini","Gemini"),("claude","Claude"),("scarlet","Scarlet"),
+                                ("ocean","Ocean"),("rose","Rose"),("mint","Mint")]:
+                prefix = "* " if self._theme == key else "  "
+                theme_sub.add_command(label=prefix + label,
+                                      command=lambda k=key: self._apply_theme(k))
+            m.add_cascade(label="Theme", menu=theme_sub)
+            m.add_separator()
 
-        self._theme_btn = tk.Button(
-            hdr, text="Theme", font=FONT_SMALL,
-            bg=C["accent_dk"], fg=C["tab_act"],
-            activebackground=C["accent"], activeforeground=C["tab_act"],
-            relief="flat", cursor="hand2", bd=0,
-            command=self._show_theme_menu,
-        )
-        self._theme_btn.pack(side="right", padx=(0, 4), pady=3)
+            # Banner toggle
+            m.add_checkbutton(label="Banner notifications",
+                              variable=self._banner_enabled,
+                              onvalue=True, offvalue=False)
 
-        self._show_options = tk.BooleanVar(value=False)
-        tk.Checkbutton(hdr, text="Options",
-                       variable=self._show_options,
-                       bg=C["accent"], fg="white",
-                       activebackground=C["accent"], activeforeground="white",
-                       selectcolor=C["accent_dk"],
-                       relief="flat", bd=0, font=FONT_SMALL,
-                       ).pack(side="right", padx=(0, 2))
+            # Notify duration
+            def _edit_notify_sec():
+                dlg = InputDialog(self, "Notify Duration",
+                                  f"Display seconds (3–60):",
+                                  default=str(self._notify_display_sec.get()))
+                if dlg.result:
+                    try:
+                        self._notify_display_sec.set(max(3, min(60, int(dlg.result))))
+                    except ValueError:
+                        pass
+            m.add_command(label=f"Notify duration: {self._notify_display_sec.get()} s",
+                          command=_edit_notify_sec)
+            m.add_separator()
+
+            # Pin on top
+            is_top = bool(self.attributes("-topmost"))
+            def _toggle_topmost():
+                self.attributes("-topmost", not bool(self.attributes("-topmost")))
+                self._save_config()
+            m.add_command(label=("* " if is_top else "  ") + "Pin on top",
+                          command=_toggle_topmost)
+            m.add_separator()
+
+            # Screenshot options mode
+            m.add_checkbutton(label="Screenshot options",
+                              variable=self._show_options,
+                              onvalue=True, offvalue=False)
+            m.add_separator()
+
+            # Card size submenu
+            size_sub = tk.Menu(m, tearoff=0,
+                               bg=C["card"], fg=C["text"],
+                               activebackground=C["card_h"], activeforeground=C["text"],
+                               relief="flat", font=FONT_SMALL)
+            for key, label in [("compact", "Compact"), ("normal", "Normal"), ("large", "Large")]:
+                prefix = "* " if self._card_size == key else "  "
+                size_sub.add_command(
+                    label=prefix + label,
+                    command=lambda k=key: self._set_card_size(k))
+            m.add_cascade(label="Card size", menu=size_sub)
+
+            # Transparency
+            m.add_command(label="Transparency...", command=self._open_transparency_dialog)
+
+            m.tk_popup(_cfg_btn.winfo_rootx(),
+                       _cfg_btn.winfo_rooty() + _cfg_btn.winfo_height())
+
+        _cfg_btn = tk.Button(hdr, text="...", command=_show_settings, **_btn_cfg)
+        _cfg_btn.pack(side="right", padx=(0, 6))
+
+        # Record
+        tk.Button(hdr, text="Record", command=self._open_recording,
+                  **_btn_cfg).pack(side="right", padx=(0, 2))
+
+        # Screenshot
+        tk.Button(hdr, text="Screenshot", command=self._open_screenshot,
+                  **_btn_cfg).pack(side="right", padx=(0, 2))
+
+        # Sleep ▾
+        def _sleep_menu(e=None):
+            m = tk.Menu(self, tearoff=0,
+                        bg=C["card"], fg=C["text"],
+                        activebackground=C["card_h"], activeforeground=C["text"],
+                        relief="flat", font=FONT_SMALL)
+            m.add_command(label="Window",      command=lambda: self._open_sleep_screen(False))
+            m.add_command(label="Full Screen", command=lambda: self._open_sleep_screen(True))
+            m.tk_popup(e.x_root, e.y_root)
+        _sleep_btn = tk.Button(hdr, text="Sleep", **_btn_cfg)
+        _sleep_btn.pack(side="right", padx=(0, 2))
+        _sleep_btn.bind("<Button-1>", _sleep_menu)
+
+        # Minimize to tray
+        self.bind("<Unmap>", self._on_unmap)
+        self.protocol("WM_DELETE_WINDOW", self._on_close)
 
         # tab bar
         self._tab_bar = tk.Frame(self, bg=C["tab_inact"])
@@ -2970,6 +3180,12 @@ class FolderLauncher(tk.Tk):
         # Start file watcher when entering the Auto tab
         if idx == -9:
             self._ensure_file_watcher()
+        # ポモドーロタブを離れたら表示ラベルをリセット（タイマーは動き続ける）
+        if idx != -10:
+            self._pomo_lbl_time = None
+            self._pomo_lbl_state = None
+            self._pomo_lbl_cycle = None
+            self._pomo_canvas = None
 
     def _update_footer(self):
         """Update footer button text/command based on active tab."""
@@ -3003,6 +3219,12 @@ class FolderLauncher(tk.Tk):
             self._footer_btn2.pack_forget()
         elif self._active == -9:
             self._footer_btn.configure(text="+ Add Rule", command=self._add_rule)
+            self._footer_btn2.pack_forget()
+        elif self._active == -10:
+            self._footer_btn.configure(text="Settings", command=self._pomo_open_settings)
+            self._footer_btn2.pack_forget()
+        elif self._active == -11:
+            self._footer_btn.configure(text="Today", command=self._cal_go_today)
             self._footer_btn2.pack_forget()
         else:
             self._footer_btn.configure(text="+ Add Folder", command=self._add_folder)
@@ -3069,6 +3291,14 @@ class FolderLauncher(tk.Tk):
                        relief="flat", font=FONT)
         menu.add_command(label="Rename",
                          command=lambda: self._rename_category(idx))
+        menu.add_separator()
+        menu.add_command(label="Move Left",
+                         command=lambda: self._move_category(idx, -1),
+                         state="normal" if idx > 0 else "disabled")
+        menu.add_command(label="Move Right",
+                         command=lambda: self._move_category(idx, +1),
+                         state="normal" if idx < len(self._data) - 1 else "disabled")
+        menu.add_separator()
         menu.add_command(label="Delete",
                          command=lambda: self._delete_category(idx))
         menu.tk_popup(event.x_root, event.y_root)
@@ -3094,6 +3324,16 @@ class FolderLauncher(tk.Tk):
         self._data[idx]["category"] = dlg.result
         self._save()
         self._render_tabs()
+
+    def _move_category(self, idx: int, direction: int):
+        new_idx = idx + direction
+        if not (0 <= new_idx < len(self._data)):
+            return
+        self._data[idx], self._data[new_idx] = self._data[new_idx], self._data[idx]
+        self._active = new_idx
+        self._save()
+        self._render_tabs()
+        self._render_list()
 
     def _delete_category(self, idx: int):
         name = self._data[idx]["category"]
@@ -3133,6 +3373,10 @@ class FolderLauncher(tk.Tk):
             self._render_dashboard()
         elif self._active == -9:
             self._render_rules_list()
+        elif self._active == -10:
+            self._render_pomodoro()
+        elif self._active == -11:
+            self._render_calendar()
         else:
             self._render_folder_list()
 
@@ -3154,10 +3398,15 @@ class FolderLauncher(tk.Tk):
                             entry.get("type", "folder"))
 
     def _make_card(self, idx: int, name: str, path: str, item_type: str = "folder"):
+        size = self._card_size
+        pad_y = {"compact": 1, "normal": 4, "large": 8}.get(size, 4)
+        pad_x = {"compact": 6, "normal": 8, "large": 12}.get(size, 8)
+        name_font = FONT_SMALL if size == "compact" else FONT_BOLD
+
         card = tk.Frame(self._list_frame, bg=C["card"],
-                        pady=4, padx=8, relief="flat", bd=0,
+                        pady=pad_y, padx=pad_x, relief="flat", bd=0,
                         highlightthickness=1, highlightbackground=C["border"])
-        card.pack(fill="x", pady=2, padx=2)
+        card.pack(fill="x", pady=(1 if size == "compact" else 2), padx=2)
 
         left = tk.Frame(card, bg=C["card"])
         left.pack(side="left", fill="both", expand=True)
@@ -3165,10 +3414,15 @@ class FolderLauncher(tk.Tk):
         type_tag = "[F] " if item_type == "file" else ""
         tk.Label(left, text=f"{type_tag}{name}",
                  bg=C["card"], fg=C["text"],
-                 font=FONT_BOLD, anchor="w").pack(fill="x")
+                 font=name_font, anchor="w").pack(fill="x")
+
+        if size == "large":
+            tk.Label(left, text=path,
+                     bg=C["card"], fg=C["text_sub"],
+                     font=FONT_SMALL, anchor="w").pack(fill="x")
 
         del_btn = tk.Button(
-            card, text="✕",
+            card, text="x",
             command=lambda i=idx: self._remove_folder(i),
             bg=C["card"], fg=C["btn_del"],
             relief="flat", bd=0,
@@ -3177,21 +3431,24 @@ class FolderLauncher(tk.Tk):
         )
         del_btn.pack(side="right", padx=(6, 0))
 
-        edit_btn = tk.Button(
-            card, text="Edit",
-            command=lambda i=idx, n=name, p=path: self._edit_folder(i, n, p),
-            bg=C["card"], fg=C["text_sub"],
-            relief="flat", bd=0,
-            font=FONT_SMALL, cursor="hand2",
-            activebackground=C["card"], activeforeground=C["text"],
-        )
-        edit_btn.pack(side="right", padx=(0, 2))
+        extra_btns = [del_btn]
+        if size != "compact":
+            edit_btn = tk.Button(
+                card, text="Edit",
+                command=lambda i=idx, n=name, p=path: self._edit_folder(i, n, p),
+                bg=C["card"], fg=C["text_sub"],
+                relief="flat", bd=0,
+                font=FONT_SMALL, cursor="hand2",
+                activebackground=C["card"], activeforeground=C["text"],
+            )
+            edit_btn.pack(side="right", padx=(0, 2))
+            extra_btns.append(edit_btn)
 
         def _show_ctx(e):
             self._card_context_menu(e, idx, name, path)
 
         def _bind_open(w):
-            if w in (del_btn, edit_btn):
+            if w in extra_btns:
                 return
             w.bind("<Button-1>", lambda e, p=path, t=item_type: self._open_item(p, t))
             w.bind("<Button-3>", _show_ctx)
@@ -3212,12 +3469,12 @@ class FolderLauncher(tk.Tk):
 
         # 並び替え
         menu.add_command(
-            label="↑ Move Up",
+            label="Move Up",
             command=lambda: self._move_folder_order(idx, -1),
             state="normal" if idx > 0 else "disabled",
         )
         menu.add_command(
-            label="↓ Move Down",
+            label="Move Down",
             command=lambda: self._move_folder_order(idx, +1),
             state="normal" if idx < len(folders) - 1 else "disabled",
         )
@@ -3235,7 +3492,7 @@ class FolderLauncher(tk.Tk):
                     label=cat["category"],
                     command=lambda ci=ci: self._move_folder_to(idx, ci),
                 )
-            menu.add_cascade(label="Move to ▶", menu=move_menu)
+            menu.add_cascade(label="Move to", menu=move_menu)
 
         menu.add_separator()
         menu.add_command(label="Rename",
@@ -3353,8 +3610,22 @@ class FolderLauncher(tk.Tk):
 
         def _hdr(key: str, label: str) -> str:
             if self._conn_sort["col"] == key:
-                return label + (" ▼" if self._conn_sort["reverse"] else " ▲")
+                return label + (" v" if self._conn_sort["reverse"] else " ^")
             return label
+
+        # Terminal ping ドット ON/OFF トグル
+        def _toggle_conn_ping():
+            self._conn_ping_enabled = not self._conn_ping_enabled
+            self._save_config()
+            self._render_list()
+
+        ping_lbl = "Ping ON" if self._conn_ping_enabled else "Ping OFF"
+        ping_fg  = C["accent"] if self._conn_ping_enabled else C["text_sub"]
+        tk.Button(toolbar, text=ping_lbl, command=_toggle_conn_ping,
+                  bg=C["tab_inact"], fg=ping_fg, relief="flat", bd=0,
+                  font=FONT_SMALL, cursor="hand2", padx=6, pady=2,
+                  activebackground=C["card_h"],
+                  activeforeground=ping_fg).pack(side="left", padx=(4, 0))
 
         sort_frame = tk.Frame(toolbar, bg=C["bg"])
         sort_frame.pack(side="right", padx=(4, 0))
@@ -3406,11 +3677,12 @@ class FolderLauncher(tk.Tk):
         for i, conn in conns_idx:
             self._make_conn_card(i, conn, main_frame)
 
-        # 表示中の各ホストへ ping プローブを開始
-        for _, conn in conns_idx:
-            host = conn.get("host", "")
-            if host and host not in self._conn_ping_running:
-                self._conn_ping_probe(host)
+        # 表示中の各ホストへ ping プローブを開始（有効時のみ）
+        if self._conn_ping_enabled:
+            for _, conn in conns_idx:
+                host = conn.get("host", "")
+                if host and host not in self._conn_ping_running:
+                    self._conn_ping_probe(host)
 
         # ── ドラッグ&ドロップ（ソート・検索・グループ絞り込みなし時のみ有効）──
         if col is not None or query or sg is not None:
@@ -3643,7 +3915,7 @@ class FolderLauncher(tk.Tk):
                  bg=C["card"], fg=proto_color,
                  font=FONT_SMALL, anchor="w").pack(fill="x")
 
-        del_btn = tk.Button(card, text="✕",
+        del_btn = tk.Button(card, text="x",
                             command=lambda i=idx: self._remove_conn(i),
                             bg=C["card"], fg=C["btn_del"],
                             relief="flat", bd=0,
@@ -3659,14 +3931,15 @@ class FolderLauncher(tk.Tk):
                              activebackground=C["card"], activeforeground=C["text"])
         edit_btn.pack(side="right", padx=(0, 2))
 
-        # 接続可否ドット（バックグラウンド ping 結果を反映）
+        # 接続可否ドット（バックグラウンド ping 結果を反映、無効時は非表示）
         host = conn.get("host", "")
-        status = self._conn_ping_cache.get(host)
-        dot_color = {"ok": "#4caf50", "fail": C["btn_del"]}.get(status, C["border"])
-        dot_cv = tk.Canvas(card, width=12, height=12, bg=C["card"], highlightthickness=0)
-        dot_cv.pack(side="right", padx=(0, 6))
-        dot_cv.create_oval(1, 1, 11, 11, fill=dot_color, outline="")
-        self._conn_ping_dots.setdefault(host, []).append(dot_cv)
+        if self._conn_ping_enabled:
+            status = self._conn_ping_cache.get(host)
+            dot_color = {"ok": "#4caf50", "fail": C["btn_del"]}.get(status, C["border"])
+            dot_cv = tk.Canvas(card, width=12, height=12, bg=C["card"], highlightthickness=0)
+            dot_cv.pack(side="right", padx=(0, 6))
+            dot_cv.create_oval(1, 1, 11, 11, fill=dot_color, outline="")
+            self._conn_ping_dots.setdefault(host, []).append(dot_cv)
 
         for widget in (card, left) + tuple(left.winfo_children()):
             widget.bind("<Button-1>", lambda e, c=conn: self._connect_server(c))
@@ -3895,7 +4168,7 @@ class FolderLauncher(tk.Tk):
 
             # 削除ボタン
             del_btn = tk.Button(
-                card, text="✕",
+                card, text="x",
                 command=lambda i=idx: self._remove_clip(i),
                 bg=C["card"], fg=C["btn_del"],
                 relief="flat", bd=0,
@@ -4065,7 +4338,7 @@ class FolderLauncher(tk.Tk):
         # 下段: 進捗バー + 残日数
         pct = task.get("progress", 0)
         filled  = int(pct / 10)
-        bar_str = "█" * filled + "░" * (10 - filled)
+        bar_str = "#" * filled + "-" * (10 - filled)
 
         dl_str = task.get("deadline", "")
         if dl_str:
@@ -4198,7 +4471,7 @@ class FolderLauncher(tk.Tk):
                   ).pack(side="right", padx=(4, 0))
 
         # Delete button
-        tk.Button(top, text="✕",
+        tk.Button(top, text="x",
                   command=lambda i=idx: self._remove_rule(i),
                   bg=C["card"], fg=C["btn_del"],
                   relief="flat", bd=0,
@@ -4463,7 +4736,7 @@ class FolderLauncher(tk.Tk):
                   activeforeground=C["text"]).pack(side="left")
 
         # ON/OFF トグルボタン
-        toggle_text = "■ Stop" if self._ping_running else "▶ Start"
+        toggle_text = "Stop" if self._ping_running else "Start"
         toggle_fg   = C["btn_del"] if self._ping_running else C["accent"]
         tk.Button(cfg_bar, text=toggle_text,
                   command=self._ping_toggle,
@@ -4562,7 +4835,7 @@ class FolderLauncher(tk.Tk):
                 self._save_config()
                 self._render_list()
 
-            del_btn = tk.Button(row, text="✕", command=_del,
+            del_btn = tk.Button(row, text="x", command=_del,
                                 bg=C["card"], fg=C["btn_del"],
                                 relief="flat", bd=0, font=("Segoe UI", 11),
                                 cursor="hand2",
@@ -4748,33 +5021,33 @@ class FolderLauncher(tk.Tk):
     # ── Memo pad ──────────────────────────────────────────
 
     def _render_memo_list(self):
-        """メモパッド UI を描画する。"""
+        """Render memo pad UI."""
         outer = tk.Frame(self._list_frame, bg=C["bg"])
         outer.pack(fill="both", expand=True)
 
-        # ── 左ペイン: タイトル一覧 ──
+        # ── Left pane: title list ──
         left = tk.Frame(outer, bg=C["bg"], width=130)
         left.pack(side="left", fill="y")
         left.pack_propagate(False)
 
         tk.Frame(outer, bg=C["border"], width=1).pack(side="left", fill="y")
 
-        # ── 右ペイン: 編集エリア ──
+        # ── Right pane: edit area ──
         right = tk.Frame(outer, bg=C["bg"])
         right.pack(side="left", fill="both", expand=True)
 
-        # 右ペインの内容を描画するヘルパー
+        # Helper to render right pane content
         def _show_editor(idx: int | None):
             for w in right.winfo_children():
                 w.destroy()
             if idx is None or not self._memos:
-                tk.Label(right, text="メモを選択または追加してください",
+                tk.Label(right, text="Select or add a memo",
                          bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL).pack(pady=20)
                 return
 
             memo = self._memos[idx]
 
-            # タイトル入力
+            # Title input
             title_var = tk.StringVar(value=memo.get("title", ""))
             tk.Label(right, text="Title", bg=C["bg"], fg=C["text_sub"],
                      font=FONT_SMALL, anchor="w").pack(fill="x", padx=10, pady=(8, 0))
@@ -4783,7 +5056,7 @@ class FolderLauncher(tk.Tk):
                                insertbackground=C["accent"])
             title_e.pack(fill="x", padx=10, pady=(2, 6))
 
-            # 本文テキストエリア
+            # Body text area
             tk.Label(right, text="Body", bg=C["bg"], fg=C["text_sub"],
                      font=FONT_SMALL, anchor="w").pack(fill="x", padx=10)
             body_frame = tk.Frame(right, bg=C["bg"])
@@ -4798,7 +5071,7 @@ class FolderLauncher(tk.Tk):
             body_txt.pack(side="left", fill="both", expand=True)
             vsb.pack(side="right", fill="y")
 
-            # ボタン行
+            # Button row
             btn_row = tk.Frame(right, bg=C["bg"])
             btn_row.pack(fill="x", padx=10, pady=(0, 8))
 
@@ -4834,11 +5107,11 @@ class FolderLauncher(tk.Tk):
                       activebackground=C["btn_del_h"], activeforeground="white",
                       ).pack(side="right")
 
-            # Ctrl+S で保存
+            # Save on focus out
             title_e.bind("<FocusOut>", _save_memo)
             body_txt.bind("<FocusOut>", _save_memo)
 
-        # 左ペインのリストを再描画するヘルパー
+        # Helper to refresh left pane list
         def _refresh_list():
             for w in left.winfo_children():
                 w.destroy()
@@ -4963,7 +5236,7 @@ class FolderLauncher(tk.Tk):
                  bg=C["card"], fg=C["accent"],
                  font=FONT_SMALL, anchor="w").pack(fill="x")
 
-        del_btn = tk.Button(card, text="✕",
+        del_btn = tk.Button(card, text="x",
                             command=lambda i=item_idx: self._remove_bookmark(i),
                             bg=C["card"], fg=C["btn_del"],
                             relief="flat", bd=0,
@@ -5050,7 +5323,715 @@ class FolderLauncher(tk.Tk):
         self._save_config()
         self._render_list()
 
+    # ── Calendar ───────────────────────────────────────────
+
+    def _render_calendar(self):
+        """タスク締め切りカレンダーを描画する。"""
+        import calendar as _cal_mod
+        f = self._list_frame
+        _dark = self._theme in ("dark", "claude", "scarlet", "ocean")
+        today = datetime.date.today()
+
+        # タスクを締め切り日でインデックス化
+        deadline_map: dict[str, list[dict]] = {}
+        for task in self._tasks:
+            dl = task.get("deadline", "")
+            if dl:
+                deadline_map.setdefault(dl, []).append(task)
+
+        # ── ナビゲーションヘッダー ──
+        nav = tk.Frame(f, bg=C["bg"])
+        nav.pack(fill="x", padx=6, pady=(6, 2))
+
+        tk.Button(nav, text="<",
+                  command=self._cal_prev_month,
+                  bg=C["card"], fg=C["text"], relief="flat", bd=0,
+                  font=FONT_BOLD, cursor="hand2", padx=10, pady=3,
+                  activebackground=C["card_h"], activeforeground=C["text"],
+                  ).pack(side="left")
+
+        tk.Label(nav,
+                 text=f"{self._cal_year}  /  {self._cal_month:02d}",
+                 bg=C["bg"], fg=C["text"], font=FONT_BOLD,
+                 ).pack(side="left", fill="x", expand=True)
+
+        tk.Button(nav, text=">",
+                  command=self._cal_next_month,
+                  bg=C["card"], fg=C["text"], relief="flat", bd=0,
+                  font=FONT_BOLD, cursor="hand2", padx=10, pady=3,
+                  activebackground=C["card_h"], activeforeground=C["text"],
+                  ).pack(side="right")
+
+        # ── カレンダーグリッド ──
+        grid_frame = tk.Frame(f, bg=C["bg"])
+        grid_frame.pack(fill="x", padx=6, pady=(0, 4))
+        for col in range(7):
+            grid_frame.columnconfigure(col, weight=1)
+
+        # 曜日ヘッダー（月曜始まり）
+        DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
+        DOW_FG = [C["text_sub"]] * 5 + [
+            "#6080FF" if not _dark else "#99AAFF",   # Sat
+            "#FF6060" if not _dark else "#FF9999",   # Sun
+        ]
+        for col, (d, fg) in enumerate(zip(DOW, DOW_FG)):
+            tk.Label(grid_frame, text=d, bg=C["bg"], fg=fg,
+                     font=FONT_SMALL, anchor="center",
+                     ).grid(row=0, column=col, sticky="ew", padx=1, pady=(0, 2))
+
+        # 日付セル
+        weeks = _cal_mod.monthcalendar(self._cal_year, self._cal_month)
+        for row_i, week in enumerate(weeks):
+            for col_i, day in enumerate(week):
+                date_str = (
+                    f"{self._cal_year}-{self._cal_month:02d}-{day:02d}"
+                    if day else ""
+                )
+                tasks_on_day = deadline_map.get(date_str, [])
+                is_today     = (day and
+                                self._cal_year == today.year and
+                                self._cal_month == today.month and
+                                day == today.day)
+                is_selected  = (day and day == self._cal_sel_day)
+                is_past      = (day and
+                                datetime.date(self._cal_year, self._cal_month, day) < today)
+
+                # セル背景色
+                if is_selected:
+                    cell_bg = C["accent"]
+                    day_fg  = "white"
+                elif is_today:
+                    cell_bg = C["accent_lt"]
+                    day_fg  = C["accent_dk"]
+                else:
+                    cell_bg = C["card"]
+                    day_fg  = C["text_sub"] if (not day or is_past) else C["text"]
+
+                cell = tk.Frame(grid_frame, bg=cell_bg,
+                                highlightthickness=1,
+                                highlightbackground=C["border"])
+                cell.grid(row=row_i + 1, column=col_i,
+                          sticky="nsew", padx=1, pady=1, ipady=2)
+
+                if day:
+                    # 日付番号
+                    dow_fg = day_fg
+                    if not is_selected and not is_today:
+                        if col_i == 5:
+                            dow_fg = "#6080FF" if not _dark else "#99AAFF"
+                        elif col_i == 6:
+                            dow_fg = "#FF6060" if not _dark else "#FF9999"
+                    tk.Label(cell, text=str(day), bg=cell_bg, fg=dow_fg,
+                             font=FONT_SMALL, anchor="nw",
+                             ).pack(anchor="nw", padx=3, pady=(1, 0))
+
+                    # タスクドット or 件数
+                    if tasks_on_day:
+                        n = len(tasks_on_day)
+                        all_done = all(t.get("progress", 0) == 100 for t in tasks_on_day)
+                        any_overdue = (is_past and
+                                       any(t.get("progress", 0) < 100 for t in tasks_on_day))
+                        if any_overdue:
+                            dot_fg = "#FF6060" if not _dark else "#FF9999"
+                        elif all_done:
+                            dot_fg = "#60BB80" if not _dark else "#80DDA0"
+                        else:
+                            dot_fg = C["accent"]
+                        tk.Label(cell,
+                                 text=f"* {n}" if n > 1 else "*",
+                                 bg=cell_bg, fg=dot_fg,
+                                 font=FONT_SMALL, anchor="center",
+                                 ).pack(anchor="center")
+
+                    # クリックで選択
+                    def _on_click(d=day):
+                        self._cal_sel_day = d if self._cal_sel_day != d else None
+                        self._render_list()
+                    cell.bind("<Button-1>", lambda e, d=day: _on_click(d))
+                    for child in cell.winfo_children():
+                        child.bind("<Button-1>", lambda e, d=day: _on_click(d))
+
+        # ── 選択日のタスク詳細 ──
+        if self._cal_sel_day:
+            date_str = f"{self._cal_year}-{self._cal_month:02d}-{self._cal_sel_day:02d}"
+            tasks_on_day = deadline_map.get(date_str, [])
+
+            detail = tk.Frame(f, bg=C["card"],
+                              highlightthickness=1, highlightbackground=C["border"])
+            detail.pack(fill="x", padx=6, pady=(2, 4))
+
+            tk.Label(detail,
+                     text=f"{self._cal_year}/{self._cal_month:02d}/{self._cal_sel_day:02d}",
+                     bg=C["card"], fg=C["accent"], font=FONT_BOLD,
+                     ).pack(anchor="w", padx=8, pady=(5, 2))
+
+            if not tasks_on_day:
+                tk.Label(detail, text="No tasks due.",
+                         bg=C["card"], fg=C["text_sub"], font=FONT_SMALL,
+                         ).pack(anchor="w", padx=12, pady=(0, 6))
+            else:
+                for task in tasks_on_day:
+                    pct  = task.get("progress", 0)
+                    name = f"[{task['event']}] {task.get('process','')}"
+                    if pct == 100:
+                        color = "#60BB80" if not _dark else "#80DDA0"
+                        suffix = "  (done)"
+                    elif pct > 0:
+                        color = C["accent"]
+                        suffix = f"  {pct}%"
+                    else:
+                        color = C["text"]
+                        suffix = "  (todo)"
+                    row = tk.Frame(detail, bg=C["card"])
+                    row.pack(fill="x", padx=8, pady=1)
+                    tk.Label(row, text=name + suffix,
+                             bg=C["card"], fg=color, font=FONT_SMALL,
+                             anchor="w").pack(side="left")
+                tk.Frame(detail, bg=C["card"], height=4).pack()
+
+    def _cal_prev_month(self):
+        if self._cal_month == 1:
+            self._cal_year -= 1
+            self._cal_month = 12
+        else:
+            self._cal_month -= 1
+        self._cal_sel_day = None
+        self._render_list()
+
+    def _cal_next_month(self):
+        if self._cal_month == 12:
+            self._cal_year += 1
+            self._cal_month = 1
+        else:
+            self._cal_month += 1
+        self._cal_sel_day = None
+        self._render_list()
+
+    def _cal_go_today(self):
+        today = datetime.date.today()
+        self._cal_year  = today.year
+        self._cal_month = today.month
+        self._cal_sel_day = today.day
+        self._render_list()
+
+    # ── Pomodoro ───────────────────────────────────────────
+
+    def _render_pomodoro(self):
+        """ポモドーロタブを描画する。"""
+        f = self._list_frame
+        _dark = self._theme in ("dark", "claude", "scarlet", "ocean")
+
+        state_text = {
+            "idle": "Ready", "work": "Work", "break": "Break",
+            "long_break": "Long Break", "paused": "Paused",
+        }
+        state_colors = {
+            "idle":       C["text_sub"],
+            "work":       C["accent"],
+            "break":      "#4CAF50" if not _dark else "#80DDA0",
+            "long_break": "#2196F3" if not _dark else "#80C8FF",
+            "paused":     C["text_sub"],
+        }
+
+        # ── タイマーカード ──
+        card = tk.Frame(f, bg=C["card"],
+                        highlightthickness=1, highlightbackground=C["border"])
+        card.pack(fill="x", padx=6, pady=(6, 3))
+
+        # 1行目: [状態]  [MM:SS]  [サイクル]
+        row1 = tk.Frame(card, bg=C["card"])
+        row1.pack(fill="x", padx=10, pady=(6, 2))
+
+        self._pomo_lbl_state = tk.Label(
+            row1,
+            text=state_text.get(self._pomo_state, "Ready"),
+            bg=C["card"], fg=state_colors.get(self._pomo_state, C["text_sub"]),
+            font=FONT_SMALL, width=9, anchor="w",
+        )
+        self._pomo_lbl_state.pack(side="left")
+
+        mins, secs = divmod(self._pomo_remaining, 60)
+        self._pomo_lbl_time = tk.Label(
+            row1, text=f"{mins:02d}:{secs:02d}",
+            bg=C["card"], fg=C["text"],
+            font=("Segoe UI", 18, "bold"),
+        )
+        self._pomo_lbl_time.pack(side="left", padx=(4, 4))
+
+        self._pomo_lbl_cycle = tk.Label(
+            row1, text=self._pomo_cycle_text(),
+            bg=C["card"], fg=C["text_sub"],
+            font=FONT_SMALL,
+        )
+        self._pomo_lbl_cycle.pack(side="left")
+
+        # 2行目: プログレスバー（細い横バー）
+        self._pomo_canvas = tk.Canvas(card, height=6, bg=C["border"],
+                                      highlightthickness=0)
+        self._pomo_canvas.pack(fill="x", padx=10, pady=(2, 6))
+        self._pomo_draw_arc()
+
+        # ── ボタン行 ──
+        btn_row = tk.Frame(f, bg=C["bg"])
+        btn_row.pack(fill="x", padx=6, pady=(0, 3))
+
+        if self._pomo_state in ("idle", "paused"):
+            tk.Button(btn_row, text="Start",
+                      command=self._pomo_start,
+                      bg=C["accent"], fg="white", relief="flat", bd=0,
+                      font=FONT_BOLD, cursor="hand2", pady=4,
+                      activebackground=C["accent_dk"], activeforeground="white",
+                      ).pack(side="left", fill="x", expand=True, padx=(0, 2))
+        else:
+            tk.Button(btn_row, text="Pause",
+                      command=self._pomo_pause,
+                      bg=C["accent_lt"], fg=C["accent_dk"], relief="flat", bd=0,
+                      font=FONT_BOLD, cursor="hand2", pady=4,
+                      activebackground=C["border"], activeforeground=C["accent_dk"],
+                      ).pack(side="left", fill="x", expand=True, padx=(0, 2))
+
+        tk.Button(btn_row, text="Reset",
+                  command=self._pomo_reset,
+                  bg=C["card"], fg=C["text_sub"], relief="flat", bd=0,
+                  font=FONT, cursor="hand2", pady=4,
+                  activebackground=C["card_h"], activeforeground=C["text"],
+                  ).pack(side="left", fill="x", expand=True)
+
+        # ── リンクタスク ──
+        task_row = tk.Frame(f, bg=C["bg"])
+        task_row.pack(fill="x", padx=6, pady=(0, 3))
+
+        tk.Label(task_row, text="Task:",
+                 bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL).pack(side="left")
+
+        task_names = ["(none)"] + [
+            f"[{t['event']}] {t.get('process','')}" for t in self._tasks
+        ]
+        task_var = tk.StringVar()
+        if self._pomo_task_idx is not None and self._pomo_task_idx < len(self._tasks):
+            t = self._tasks[self._pomo_task_idx]
+            task_var.set(f"[{t['event']}] {t.get('process','')}")
+        else:
+            task_var.set("(none)")
+
+        om = tk.OptionMenu(task_row, task_var, *task_names)
+        om.configure(bg=C["card"], fg=C["text"], relief="flat",
+                     font=FONT_SMALL, cursor="hand2",
+                     activebackground=C["card_h"], activeforeground=C["text"],
+                     highlightthickness=0)
+        om["menu"].configure(bg=C["card"], fg=C["text"],
+                             activebackground=C["card_h"],
+                             activeforeground=C["text"], font=FONT_SMALL)
+        om.pack(side="left", padx=(4, 0), fill="x", expand=True)
+
+        def _on_task_select(*_):
+            val = task_var.get()
+            if val == "(none)":
+                self._pomo_task_idx = None
+            else:
+                for i, t in enumerate(self._tasks):
+                    if f"[{t['event']}] {t.get('process','')}" == val:
+                        self._pomo_task_idx = i
+                        break
+        task_var.trace_add("write", _on_task_select)
+
+        # ── 統計 ──
+        tk.Label(f,
+                 text=f"Sessions: {self._pomo_session}   "
+                      f"{self._pomo_work_min}m / {self._pomo_break_min}m / {self._pomo_long_break_min}m",
+                 bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL,
+                 ).pack(anchor="w", padx=8, pady=(0, 4))
+
+    def _pomo_cycle_text(self) -> str:
+        dots = ""
+        for i in range(4):
+            dots += "* " if i < (self._pomo_cycle % 4) else "- "
+        return dots.strip()
+
+    def _pomo_draw_arc(self):
+        """円形プログレスバーを描画する。"""
+        c = self._pomo_canvas
+        if c is None:
+            return
+        c.update_idletasks()
+        w = c.winfo_width()
+        if w <= 1:
+            w = 260
+        c.delete("all")
+        _dark = self._theme in ("dark", "claude", "scarlet", "ocean")
+
+        total = self._pomo_total_seconds()
+        ratio = max(0.0, min(1.0, self._pomo_remaining / total)) if total > 0 else 1.0
+
+        arc_colors = {
+            "work":       C["accent"],
+            "break":      "#4CAF50" if not _dark else "#80DDA0",
+            "long_break": "#2196F3" if not _dark else "#80C8FF",
+        }
+        bar_color = arc_colors.get(self._pomo_state, C["accent_lt"])
+
+        fill_w = int(w * ratio)
+        if fill_w > 0:
+            c.create_rectangle(0, 0, fill_w, 6, fill=bar_color, outline="")
+
+    def _pomo_total_seconds(self) -> int:
+        state = self._pomo_state
+        if state == "paused":
+            state = self._pomo_paused_state
+        if state == "work":
+            return self._pomo_work_min * 60
+        elif state == "long_break":
+            return self._pomo_long_break_min * 60
+        else:
+            return self._pomo_break_min * 60
+
+    def _pomo_start(self):
+        if self._pomo_state == "idle":
+            self._pomo_remaining = self._pomo_work_min * 60
+            self._pomo_state = "work"
+        elif self._pomo_state == "paused":
+            self._pomo_state = self._pomo_paused_state
+        self._pomo_tick()
+        self._render_list()
+
+    def _pomo_pause(self):
+        if self._pomo_state in ("work", "break", "long_break"):
+            self._pomo_paused_state = self._pomo_state
+            self._pomo_state = "paused"
+            if self._pomo_after_id:
+                self.after_cancel(self._pomo_after_id)
+                self._pomo_after_id = None
+        self._render_list()
+
+    def _pomo_reset(self):
+        if self._pomo_after_id:
+            self.after_cancel(self._pomo_after_id)
+            self._pomo_after_id = None
+        self._pomo_state = "idle"
+        self._pomo_remaining = self._pomo_work_min * 60
+        self._render_list()
+
+    def _pomo_tick(self):
+        if self._pomo_state not in ("work", "break", "long_break"):
+            return
+        self._pomo_remaining -= 1
+
+        # ラベル更新（タブが表示中のみ）
+        if self._pomo_lbl_time is not None:
+            mins, secs = divmod(self._pomo_remaining, 60)
+            try:
+                self._pomo_lbl_time.configure(text=f"{mins:02d}:{secs:02d}")
+            except tk.TclError:
+                self._pomo_lbl_time = None
+        if self._pomo_canvas is not None:
+            try:
+                self._pomo_draw_arc()
+            except tk.TclError:
+                self._pomo_canvas = None
+
+        if self._pomo_remaining <= 0:
+            self._pomo_on_complete()
+            return
+
+        self._pomo_after_id = self.after(1000, self._pomo_tick)
+
+    def _pomo_on_complete(self):
+        self.bell()
+        if self._pomo_state == "work":
+            self._pomo_session += 1
+            self._pomo_cycle += 1
+            # リンクタスクに作業ログを記録
+            if self._pomo_task_idx is not None and self._pomo_task_idx < len(self._tasks):
+                task = self._tasks[self._pomo_task_idx]
+                now = datetime.datetime.now()
+                start = now - datetime.timedelta(minutes=self._pomo_work_min)
+                task.setdefault("work_logs", []).append({
+                    "start": start.isoformat(timespec="seconds"),
+                    "end":   now.isoformat(timespec="seconds"),
+                    "note":  "Pomodoro",
+                })
+                self._save_config()
+            # 4サイクルで長休憩
+            if self._pomo_cycle % 4 == 0:
+                self._pomo_state = "long_break"
+                self._pomo_remaining = self._pomo_long_break_min * 60
+            else:
+                self._pomo_state = "break"
+                self._pomo_remaining = self._pomo_break_min * 60
+        else:
+            self._pomo_state = "work"
+            self._pomo_remaining = self._pomo_work_min * 60
+
+        if self._active == -10:
+            self._render_list()
+        else:
+            # バックグラウンドでも自動開始
+            self._pomo_after_id = self.after(1000, self._pomo_tick)
+
+    def _pomo_open_settings(self):
+        dlg = tk.Toplevel(self)
+        dlg.title("Pomodoro Settings")
+        dlg.configure(bg=C["bg"])
+        dlg.resizable(False, False)
+        dlg.transient(self)
+        dlg.grab_set()
+
+        def _row(label, default):
+            row = tk.Frame(dlg, bg=C["bg"])
+            row.pack(fill="x", padx=16, pady=4)
+            tk.Label(row, text=label, bg=C["bg"], fg=C["text"],
+                     font=FONT, width=14, anchor="w").pack(side="left")
+            var = tk.StringVar(value=str(default))
+            tk.Entry(row, textvariable=var, bg=C["card"], fg=C["text"],
+                     insertbackground=C["text"], relief="flat",
+                     font=FONT, width=6).pack(side="left", padx=(4, 0))
+            return var
+
+        tk.Label(dlg, text="Pomodoro Settings", bg=C["bg"], fg=C["text"],
+                 font=FONT_BOLD, pady=10).pack()
+
+        v_work  = _row("Work (min):",       self._pomo_work_min)
+        v_break = _row("Break (min):",      self._pomo_break_min)
+        v_long  = _row("Long break (min):", self._pomo_long_break_min)
+
+        def _save():
+            try:
+                self._pomo_work_min       = max(1, int(v_work.get()))
+                self._pomo_break_min      = max(1, int(v_break.get()))
+                self._pomo_long_break_min = max(1, int(v_long.get()))
+            except ValueError:
+                pass
+            if self._pomo_state == "idle":
+                self._pomo_remaining = self._pomo_work_min * 60
+            dlg.destroy()
+            self._render_list()
+
+        btn_row = tk.Frame(dlg, bg=C["bg"])
+        btn_row.pack(pady=(8, 12))
+        tk.Button(btn_row, text="Save",
+                  command=_save,
+                  bg=C["accent"], fg="white", relief="flat", bd=0,
+                  font=FONT_BOLD, cursor="hand2", padx=20, pady=6,
+                  activebackground=C["accent_dk"], activeforeground="white",
+                  ).pack(side="left", padx=4)
+        tk.Button(btn_row, text="Cancel",
+                  command=dlg.destroy,
+                  bg=C["card"], fg=C["text_sub"], relief="flat", bd=0,
+                  font=FONT, cursor="hand2", padx=12, pady=6,
+                  activebackground=C["card_h"], activeforeground=C["text"],
+                  ).pack(side="left", padx=4)
+
     # ── Task list ─────────────────────────────────────────
+
+    def _render_kanban(self):
+        """Render tasks as a Kanban board: Todo / Doing / Done columns."""
+        if not self._tasks:
+            tk.Label(
+                self._list_frame,
+                text="No tasks registered.\nClick \"+ Add Task\" to add one.",
+                bg=C["bg"], fg=C["text_sub"],
+                font=FONT_SMALL, justify="center",
+            ).pack(pady=20)
+            return
+
+        # Classify tasks
+        cols_data: dict[str, list[tuple[int, dict]]] = {
+            "Todo": [], "Doing": [], "Done": []
+        }
+        for i, task in enumerate(self._tasks):
+            pct = task.get("progress", 0)
+            if pct == 100:
+                cols_data["Done"].append((i, task))
+            elif pct == 0:
+                cols_data["Todo"].append((i, task))
+            else:
+                cols_data["Doing"].append((i, task))
+
+        board = tk.Frame(self._list_frame, bg=C["bg"])
+        board.pack(fill="both", expand=True, padx=2, pady=2)
+        board.columnconfigure(0, weight=1)
+        board.columnconfigure(1, weight=1)
+        board.columnconfigure(2, weight=1)
+
+        col_order = ["Todo", "Doing", "Done"]
+        _dark = self._theme in ("dark", "claude", "scarlet", "ocean")
+        col_header_colors = {
+            "Todo":  ("#5C3A5C", "#DDB8DD") if _dark else ("#EDD0ED", "#5C1A5C"),
+            "Doing": ("#3A4A5C", "#B0C8FF") if _dark else ("#D0DEFF", "#1A2A5C"),
+            "Done":  ("#1A3C24", "#80DDA0") if _dark else ("#C8EDD4", "#1A5C2E"),
+        }
+
+        for col_num, col_name in enumerate(col_order):
+            tasks = cols_data[col_name]
+            hdr_bg, hdr_fg = col_header_colors[col_name]
+
+            col_frame = tk.Frame(board, bg=C["card"],
+                                 highlightthickness=1,
+                                 highlightbackground=C["border"])
+            col_frame.grid(row=0, column=col_num, sticky="nsew",
+                           padx=(0 if col_num == 0 else 3, 0), pady=0)
+
+            # Column header
+            tk.Label(col_frame,
+                     text=f"{col_name}  ({len(tasks)})",
+                     bg=hdr_bg, fg=hdr_fg,
+                     font=FONT_BOLD, anchor="w", padx=8, pady=5,
+                     ).pack(fill="x")
+
+            # Scrollable area for cards
+            canvas = tk.Canvas(col_frame, bg=C["card"], highlightthickness=0)
+            vsb = tk.Scrollbar(col_frame, orient="vertical", command=canvas.yview)
+            canvas.configure(yscrollcommand=vsb.set)
+            vsb.pack(side="right", fill="y")
+            canvas.pack(side="left", fill="both", expand=True)
+
+            inner = tk.Frame(canvas, bg=C["card"])
+            inner_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+
+            def _on_configure(e, c=canvas, w=inner_id):
+                c.configure(scrollregion=c.bbox("all"))
+                c.itemconfigure(w, width=c.winfo_width())
+
+            canvas.bind("<Configure>", _on_configure)
+            inner.bind("<Configure>", lambda e, c=canvas: c.configure(
+                scrollregion=c.bbox("all")))
+
+            def _bind_scroll(widget, c=canvas):
+                widget.bind("<MouseWheel>",
+                            lambda e, cv=c: cv.yview_scroll(-1 * (e.delta // 120), "units"))
+                for child in widget.winfo_children():
+                    _bind_scroll(child, c)
+
+            if not tasks:
+                tk.Label(inner, text="(empty)",
+                         bg=C["card"], fg=C["text_sub"],
+                         font=FONT_SMALL, pady=10,
+                         ).pack()
+            else:
+                for i, task in tasks:
+                    pct = task.get("progress", 0)
+                    deadline = task.get("deadline", "")
+                    process = task.get("process", "")
+                    event = task.get("event", "")
+
+                    card = tk.Frame(inner, bg=C["card_h"],
+                                    highlightthickness=1,
+                                    highlightbackground=C["border"],
+                                    padx=6, pady=5)
+                    card.pack(fill="x", padx=4, pady=3)
+                    card.bind("<MouseWheel>",
+                              lambda e, cv=canvas: cv.yview_scroll(
+                                  -1 * (e.delta // 120), "units"))
+
+                    # Title row: [event] process
+                    title_frame = tk.Frame(card, bg=C["card_h"])
+                    title_frame.pack(fill="x")
+                    tk.Label(title_frame, text=f"[{event}]",
+                             bg=C["card_h"], fg=C["text_sub"],
+                             font=FONT_SMALL, anchor="w",
+                             ).pack(side="left")
+                    tk.Label(title_frame, text=process,
+                             bg=C["card_h"], fg=C["text"],
+                             font=FONT_BOLD, anchor="w",
+                             ).pack(side="left", padx=(4, 0), fill="x", expand=True)
+
+                    # Progress bar
+                    bar_bg = tk.Frame(card, bg=C["border"], height=4)
+                    bar_bg.pack(fill="x", pady=(3, 1))
+                    bar_bg.update_idletasks()
+                    if pct > 0:
+                        fill_color = (
+                            C["accent"] if pct < 100
+                            else (C["accent_dk"] if _dark else "#2E8B57")
+                        )
+                        tk.Frame(bar_bg, bg=fill_color, height=4,
+                                 width=int(bar_bg.winfo_reqwidth() * pct / 100)
+                                 ).place(x=0, y=0, relwidth=pct / 100, relheight=1)
+                    tk.Label(card, text=f"{pct}%",
+                             bg=C["card_h"], fg=C["text_sub"],
+                             font=FONT_SMALL, anchor="e",
+                             ).pack(fill="x")
+
+                    if deadline:
+                        try:
+                            d = datetime.date.fromisoformat(deadline)
+                            delta = (d - datetime.date.today()).days
+                            if delta < 0:
+                                dl_text = f"Overdue {abs(delta)}d"
+                                dl_fg = C["btn_del"]
+                            elif delta == 0:
+                                dl_text = "Due today"
+                                dl_fg = C["btn_del"]
+                            else:
+                                dl_text = f"Due +{delta}d"
+                                dl_fg = C["text_sub"]
+                        except ValueError:
+                            dl_text = deadline
+                            dl_fg = C["text_sub"]
+                        tk.Label(card, text=dl_text,
+                                 bg=C["card_h"], fg=dl_fg,
+                                 font=FONT_SMALL, anchor="w",
+                                 ).pack(fill="x")
+
+                    # Action buttons row
+                    btn_row = tk.Frame(card, bg=C["card_h"])
+                    btn_row.pack(fill="x", pady=(4, 0))
+
+                    def _make_edit_cmd(task_idx=i):
+                        def _cmd():
+                            self._task_quick_edit(task_idx)
+                        return _cmd
+
+                    tk.Button(btn_row, text="Edit",
+                              command=_make_edit_cmd(i),
+                              bg=C["accent_lt"], fg=C["accent_dk"],
+                              relief="flat", bd=0,
+                              font=FONT_SMALL, cursor="hand2", padx=6, pady=2,
+                              activebackground=C["border"],
+                              activeforeground=C["accent_dk"],
+                              ).pack(side="left")
+
+                    # Move left / right
+                    prev_col = col_order[col_num - 1] if col_num > 0 else None
+                    next_col = col_order[col_num + 1] if col_num < 2 else None
+
+                    def _make_move_cmd(task_idx, col_idx, direction):
+                        def _cmd():
+                            t = self._tasks[task_idx]
+                            # col_idx: 0=Todo, 1=Doing, 2=Done
+                            if direction == "next":
+                                t["progress"] = 50 if col_idx == 0 else 100
+                            else:
+                                t["progress"] = 50 if col_idx == 2 else 0
+                            t["updated"] = datetime.date.today().isoformat()
+                            self._save_config()
+                            self._render_list()
+                        return _cmd
+
+                    if prev_col:
+                        tk.Button(btn_row, text="< " + prev_col,
+                                  command=_make_move_cmd(i, col_num, "prev"),
+                                  bg=C["card"], fg=C["text_sub"],
+                                  relief="flat", bd=0,
+                                  font=FONT_SMALL, cursor="hand2", padx=6, pady=2,
+                                  activebackground=C["card_h"],
+                                  activeforeground=C["text"],
+                                  ).pack(side="right", padx=(2, 0))
+                    if next_col:
+                        tk.Button(btn_row, text=next_col + " >",
+                                  command=_make_move_cmd(i, col_num, "next"),
+                                  bg=C["card"], fg=C["text_sub"],
+                                  relief="flat", bd=0,
+                                  font=FONT_SMALL, cursor="hand2", padx=6, pady=2,
+                                  activebackground=C["card_h"],
+                                  activeforeground=C["text"],
+                                  ).pack(side="right")
+
+                    _bind_scroll(card)
+
+    def _task_quick_edit(self, task_idx: int):
+        """Open the task edit dialog for the given task index."""
+        self._edit_task(task_idx)
 
     def _render_task_list(self):
         # configure Treeview style to match theme
@@ -5068,7 +6049,7 @@ class FolderLauncher(tk.Tk):
                   background=[("selected", C["card_h"])],
                   foreground=[("selected", C["text"])])
 
-        # 上部ツールバー（Summary ボタン）
+        # 上部ツールバー（Summary / Kanban toggle）
         toolbar = tk.Frame(self._list_frame, bg=C["bg"])
         toolbar.pack(fill="x", padx=2, pady=(2, 0))
         tk.Button(toolbar, text="Work Summary",
@@ -5077,6 +6058,22 @@ class FolderLauncher(tk.Tk):
                   font=FONT_SMALL, cursor="hand2", padx=8, pady=3,
                   activebackground=C["card_h"], activeforeground=C["text"],
                   ).pack(side="right")
+
+        def _toggle_view():
+            self._task_view = "kanban" if self._task_view == "list" else "list"
+            self._render_list()
+
+        kanban_btn_bg = C["accent_lt"] if self._task_view == "kanban" else C["card"]
+        tk.Button(toolbar, text="Kanban",
+                  command=_toggle_view,
+                  bg=kanban_btn_bg, fg=C["text_sub"], relief="flat", bd=0,
+                  font=FONT_SMALL, cursor="hand2", padx=8, pady=3,
+                  activebackground=C["card_h"], activeforeground=C["text"],
+                  ).pack(side="right", padx=(0, 2))
+
+        if self._task_view == "kanban":
+            self._render_kanban()
+            return
 
         # 作業中バー
         self._work_bar_lbl = None
@@ -5139,7 +6136,7 @@ class FolderLauncher(tk.Tk):
 
         def _hdr(key: str, label: str) -> str:
             if self._task_sort["col"] == key:
-                return label + (" ▼" if self._task_sort["reverse"] else " ▲")
+                return label + (" v" if self._task_sort["reverse"] else " ^")
             return label
 
         def _sort_cmd(key: str):
@@ -5202,7 +6199,7 @@ class FolderLauncher(tk.Tk):
         vsb.pack(side="right", fill="y")
 
         # row color by progress (red=critical / yellow=caution / green=ok)
-        _dark = self._theme in ("dark", "claude", "devil")
+        _dark = self._theme in ("dark", "claude", "scarlet", "ocean")
         if _dark:
             tree.tag_configure("p_red",    background="#5C1A20", foreground="#FFB0B8")
             tree.tag_configure("p_yellow", background="#4A3A00", foreground="#FFE680")
@@ -5229,9 +6226,16 @@ class FolderLauncher(tk.Tk):
                 deadline = task.get("deadline", "")
                 remaining = _days_left_str(deadline)
                 updated  = task.get("updated", "")
+                _recur_badge = {
+                    "daily": "[D]", "weekly": "[W]", "biweekly": "[2W]",
+                    "monthly": "[M]", "yearly": "[Y]",
+                }.get(task.get("recur", "none"), "")
+                process_disp = task.get("process", "")
+                if _recur_badge:
+                    process_disp = f"{_recur_badge} {process_disp}"
                 tree.insert(parent, "end", iid=str(i), text="",
                             tags=(_progress_tag(pct),),
-                            values=(task.get("process", ""), content,
+                            values=(process_disp, content,
                                     f"{pct}%", deadline, remaining, updated))
 
         # detail panel (show full text of selected row)
@@ -5289,7 +6293,7 @@ class FolderLauncher(tk.Tk):
                           activeforeground=C["accent_dk"],
                           ).pack(side="left", padx=(0, 4), pady=3)
 
-            # メモ行（毎回再構築）
+            # Memo row (rebuild each time)
             for w in memo_row.winfo_children():
                 w.destroy()
             m_list = task.get("memos", [])
@@ -5492,13 +6496,96 @@ class FolderLauncher(tk.Tk):
                          event_names=self._event_names())
         if dlg.result is None:
             return
+        prev_progress = self._tasks[idx].get("progress", 0)
         # 既存フィールド（memos, created_at 等）を保持しつつ上書き
         merged = dict(self._tasks[idx])
         merged.update(dlg.result)
-        merged["updated"] = datetime.date.today().isoformat()   # 最終更新日を更新
+        merged["updated"] = datetime.date.today().isoformat()
         self._tasks[idx] = merged
+        # 繰り返しタスク：完了時に次回分を生成
+        if merged.get("recur", "none") != "none" and merged.get("progress", 0) == 100 and prev_progress < 100:
+            self._spawn_recurring(merged)
         self._save_tasks()
         self._render_list()
+
+    # ── Recurring tasks ────────────────────────────────────
+
+    @staticmethod
+    def _next_recur_date(base: str, recur: str) -> str:
+        """繰り返し種別に応じて次回の締め切り日を返す。"""
+        try:
+            d = datetime.date.fromisoformat(base) if base else datetime.date.today()
+        except ValueError:
+            d = datetime.date.today()
+        if recur == "daily":
+            d += datetime.timedelta(days=1)
+        elif recur == "weekly":
+            d += datetime.timedelta(weeks=1)
+        elif recur == "biweekly":
+            d += datetime.timedelta(weeks=2)
+        elif recur == "monthly":
+            month = d.month + 1
+            year  = d.year + (month - 1) // 12
+            month = (month - 1) % 12 + 1
+            day   = min(d.day, [31,28+int((year%4==0 and year%100!=0)or year%400==0),
+                                 31,30,31,30,31,31,30,31,30,31][month-1])
+            d = d.replace(year=year, month=month, day=day)
+        elif recur == "yearly":
+            try:
+                d = d.replace(year=d.year + 1)
+            except ValueError:
+                d = d.replace(year=d.year + 1, day=28)
+        return d.isoformat()
+
+    def _spawn_recurring(self, source: dict):
+        """完了した繰り返しタスクの次回分を生成して追加する。"""
+        recur = source.get("recur", "none")
+        if recur == "none":
+            return
+        next_dl = self._next_recur_date(source.get("deadline", ""), recur)
+        new_task = {
+            "event":        source["event"],
+            "process":      source.get("process", ""),
+            "content":      source.get("content", ""),
+            "progress":     0,
+            "deadline":     next_dl,
+            "recur":        recur,
+            "work_folders": list(source.get("work_folders", [])),
+            "created_at":   datetime.date.today().isoformat(),
+            "updated":      datetime.date.today().isoformat(),
+        }
+        self._tasks.append(new_task)
+
+    def _check_recurring_tasks(self):
+        """起動時に繰り返しタスクの未生成分を補完する。"""
+        today = datetime.date.today()
+        to_add = []
+        for task in self._tasks:
+            recur = task.get("recur", "none")
+            if recur == "none" or task.get("progress", 0) < 100:
+                continue
+            dl = task.get("deadline", "")
+            next_dl = self._next_recur_date(dl, recur)
+            try:
+                next_date = datetime.date.fromisoformat(next_dl)
+            except ValueError:
+                continue
+            if next_date > today:
+                continue
+            # 同じ event+process+recur で未完了のものがなければ生成
+            exists = any(
+                t.get("recur") == recur
+                and t.get("event") == task["event"]
+                and t.get("process") == task.get("process")
+                and t.get("progress", 0) < 100
+                for t in self._tasks
+            )
+            if not exists:
+                to_add.append(task)
+        for t in to_add:
+            self._spawn_recurring(t)
+        if to_add:
+            self._save_tasks()
 
     def _remove_task(self, idx: int):
         name = self._tasks[idx]["event"]
@@ -5562,6 +6649,295 @@ class FolderLauncher(tk.Tk):
         })
         self._save_tasks()
         self._render_list()
+
+    # ── System tray ───────────────────────────────────────
+
+    def _on_unmap(self, event):
+        if event.widget is self and self.state() == "iconic":
+            self._minimize_to_tray()
+
+    def _on_close(self):
+        self.destroy()
+
+    def _set_card_size(self, size: str):
+        self._card_size = size
+        self._save_config()
+        self._render_list()
+
+    def _open_transparency_dialog(self):
+        """Show a slider dialog to adjust window transparency."""
+        win = tk.Toplevel(self)
+        win.title("Transparency")
+        win.configure(bg=C["bg"])
+        win.resizable(False, False)
+        win.grab_set()
+
+        tk.Label(win, text="Window transparency",
+                 bg=C["bg"], fg=C["text"], font=FONT).pack(padx=20, pady=(16, 4))
+
+        current = int(self.attributes("-alpha") * 100)
+        val_var = tk.StringVar(value=f"{current}%")
+
+        tk.Label(win, textvariable=val_var,
+                 bg=C["bg"], fg=C["accent"], font=FONT_BOLD).pack()
+
+        def _on_slide(v):
+            alpha = int(float(v)) / 100
+            self.attributes("-alpha", alpha)
+            val_var.set(f"{int(float(v))}%")
+
+        scale = tk.Scale(win, from_=30, to=100, orient="horizontal",
+                         length=200, command=_on_slide,
+                         bg=C["bg"], fg=C["text"],
+                         troughcolor=C["card"], activebackground=C["accent"],
+                         highlightthickness=0, bd=0, showvalue=False)
+        scale.set(current)
+        scale.pack(padx=20, pady=(4, 12))
+
+        btn_row = tk.Frame(win, bg=C["bg"])
+        btn_row.pack(padx=20, pady=(0, 16))
+
+        def _ok():
+            self._save_config()
+            win.destroy()
+
+        def _cancel():
+            self.attributes("-alpha", self._alpha_cfg)
+            win.destroy()
+
+        tk.Button(btn_row, text="OK", command=_ok,
+                  bg=C["accent"], fg="white", relief="flat", bd=0,
+                  font=FONT_BOLD, cursor="hand2", padx=20, pady=4,
+                  activebackground=C["accent_dk"], activeforeground="white",
+                  ).pack(side="left", padx=(0, 6))
+        tk.Button(btn_row, text="Cancel", command=_cancel,
+                  bg=C["card"], fg=C["text"], relief="flat", bd=0,
+                  font=FONT, cursor="hand2", padx=12, pady=4,
+                  activebackground=C["card_h"], activeforeground=C["text"],
+                  ).pack(side="left")
+
+        win.update_idletasks()
+        wx = self.winfo_rootx() + (self.winfo_width()  - win.winfo_width())  // 2
+        wy = self.winfo_rooty() + (self.winfo_height() - win.winfo_height()) // 2
+        win.geometry(f"+{wx}+{wy}")
+        win.protocol("WM_DELETE_WINDOW", _cancel)
+
+    def _show_startup_summary(self):
+        """Show a startup popup summarising tasks due today and overdue."""
+        today = datetime.date.today().isoformat()
+
+        due_today = [t for t in self._tasks
+                     if t.get("due") == today and t.get("status") != "done"]
+        overdue   = [t for t in self._tasks
+                     if t.get("due") and t.get("due") < today
+                     and t.get("status") != "done"]
+
+        if not due_today and not overdue:
+            return
+
+        win = tk.Toplevel(self)
+        win.title("Today's Summary")
+        win.configure(bg=C["bg"])
+        win.resizable(False, False)
+        win.attributes("-topmost", True)
+
+        # Header
+        tk.Label(win, text="Today's Summary",
+                 bg=C["accent"], fg="white",
+                 font=FONT_BOLD, anchor="w", padx=12, pady=6
+                 ).pack(fill="x")
+
+        body = tk.Frame(win, bg=C["bg"])
+        body.pack(fill="both", expand=True, padx=14, pady=10)
+
+        def _section(title, tasks, fg_title):
+            if not tasks:
+                return
+            tk.Label(body, text=title,
+                     bg=C["bg"], fg=fg_title,
+                     font=FONT_BOLD, anchor="w").pack(fill="x", pady=(4, 2))
+            for t in tasks[:8]:
+                name = t.get("event", "") or t.get("process", "—")
+                due  = t.get("due", "")
+                line = f"  {name}" + (f"  ({due})" if due else "")
+                tk.Label(body, text=line,
+                         bg=C["bg"], fg=C["text"],
+                         font=FONT_SMALL, anchor="w").pack(fill="x")
+            if len(tasks) > 8:
+                tk.Label(body, text=f"  ... and {len(tasks) - 8} more",
+                         bg=C["bg"], fg=C["text_sub"],
+                         font=FONT_SMALL, anchor="w").pack(fill="x")
+
+        _section(f"Due today  ({len(due_today)})", due_today, C["accent"])
+        _section(f"Overdue  ({len(overdue)})",     overdue,   "#C84040")
+
+        # Footer: countdown + close button
+        footer = tk.Frame(win, bg=C["bg"])
+        footer.pack(fill="x", padx=14, pady=(4, 10))
+
+        count_var = tk.StringVar()
+        tk.Label(footer, textvariable=count_var,
+                 bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL).pack(side="left")
+        tk.Button(footer, text="Close", command=win.destroy,
+                  bg=C["accent"], fg="white", relief="flat", bd=0,
+                  font=FONT_SMALL, cursor="hand2", padx=12, pady=3,
+                  activebackground=C["accent_dk"], activeforeground="white",
+                  ).pack(side="right")
+
+        # Auto-close countdown
+        _remaining = [10]
+        def _tick():
+            if not win.winfo_exists():
+                return
+            count_var.set(f"Closing in {_remaining[0]} s")
+            if _remaining[0] <= 0:
+                win.destroy()
+                return
+            _remaining[0] -= 1
+            win.after(1000, _tick)
+        _tick()
+
+        # Position: bottom-right of main window
+        win.update_idletasks()
+        wx = self.winfo_rootx() + self.winfo_width()  - win.winfo_width()  - 10
+        wy = self.winfo_rooty() + self.winfo_height() - win.winfo_height() - 10
+        win.geometry(f"+{wx}+{wy}")
+
+    def _minimize_to_tray(self):
+        self.withdraw()
+        if self._tray_icon is not None:
+            return  # already running
+
+        png_data = base64.b64decode(_make_icon_png(
+            ICON_PALETTES.get(self._theme, ICON_PALETTES["violet"])
+        ))
+        img = Image.open(io.BytesIO(png_data)).convert("RGBA")
+
+        menu = pystray.Menu(
+            pystray.MenuItem("Show Gem", self._restore_from_tray, default=True),
+            pystray.Menu.SEPARATOR,
+            pystray.MenuItem("Exit", self._quit_from_tray),
+        )
+        self._tray_icon = pystray.Icon("Gem", img, "Gem", menu)
+        threading.Thread(target=self._tray_icon.run, daemon=True).start()
+
+    def _restore_from_tray(self, icon=None, item=None):
+        self.after(0, self._do_restore)
+
+    def _do_restore(self):
+        if self._tray_icon is not None:
+            self._tray_icon.stop()
+            self._tray_icon = None
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+
+    def _quit_from_tray(self, icon=None, item=None):
+        self.after(0, self._do_quit)
+
+    def _do_quit(self):
+        if self._tray_icon is not None:
+            self._tray_icon.stop()
+            self._tray_icon = None
+        self.destroy()
+
+    def _open_sleep_screen(self, fullscreen: bool = False):
+        """Sleep overlay showing clock and active task."""
+        if self._sleep_win and self._sleep_win.winfo_exists():
+            return
+
+        BG      = C["card"]
+        FG      = C["text"]
+        ACCENT  = C["accent"]
+        DIM     = C["text_sub"]
+        BORDER  = C["border"]
+
+        win = tk.Toplevel(self)
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        win.configure(bg=BG)
+
+        if fullscreen:
+            sw = win.winfo_screenwidth()
+            sh = win.winfo_screenheight()
+            win.geometry(f"{sw}x{sh}+0+0")
+            clock_size, date_size, task_size, elapsed_size, hint_size = 80, 16, 18, 13, 9
+        else:
+            self.update_idletasks()
+            wx = self.winfo_rootx()
+            wy = self.winfo_rooty()
+            ww = self.winfo_width()
+            wh = self.winfo_height()
+            win.geometry(f"{ww}x{wh}+{wx}+{wy}")
+
+        _follow_bid = [None]
+        if not fullscreen:
+            def _follow(e=None):
+                if not win.winfo_exists():
+                    return
+                win.geometry(f"{self.winfo_width()}x{self.winfo_height()}"
+                             f"+{self.winfo_rootx()}+{self.winfo_rooty()}")
+            _follow_bid[0] = self.bind("<Configure>", _follow)
+            clock_size, date_size, task_size, elapsed_size, hint_size = 48, 12, 14, 11, 8
+
+        self._sleep_win = win
+
+        tk.Frame(win, bg=BORDER, height=2).place(relx=0, rely=0, relwidth=1)
+
+        clock_lbl = tk.Label(win, text="", bg=BG, fg=FG,
+                             font=("Segoe UI", clock_size, "bold"))
+        clock_lbl.place(relx=0.5, rely=0.38, anchor="center")
+
+        date_lbl = tk.Label(win, text="", bg=BG, fg=DIM,
+                            font=("Segoe UI", date_size))
+        date_lbl.place(relx=0.5, rely=0.54, anchor="center")
+
+        task_lbl = tk.Label(win, text="", bg=BG, fg=ACCENT,
+                            font=("Segoe UI", task_size, "bold"))
+        task_lbl.place(relx=0.5, rely=0.65, anchor="center")
+
+        elapsed_lbl = tk.Label(win, text="", bg=BG, fg=DIM,
+                               font=("Segoe UI", elapsed_size))
+        elapsed_lbl.place(relx=0.5, rely=0.74, anchor="center")
+
+        hint_lbl = tk.Label(win, text="Click or press any key to wake",
+                            bg=BG, fg=DIM, font=("Segoe UI", hint_size))
+        hint_lbl.place(relx=0.5, rely=0.93, anchor="center")
+
+        def _wake(e=None):
+            if self._sleep_tick_id:
+                self.after_cancel(self._sleep_tick_id)
+                self._sleep_tick_id = None
+            if _follow_bid[0] is not None:
+                try:
+                    self.unbind("<Configure>", _follow_bid[0])
+                except Exception:
+                    pass
+            win.destroy()
+            self._sleep_win = None
+
+        def _tick_sleep():
+            if not win.winfo_exists():
+                return
+            now = datetime.datetime.now()
+            clock_lbl.configure(text=now.strftime("%H:%M"))
+            date_lbl.configure(text=now.strftime("%Y-%m-%d  %A"))
+            if self._work_active is not None:
+                wa      = self._work_active
+                task    = self._tasks[wa["task_idx"]]
+                name    = task.get("process", "Task")
+                elapsed = (now - wa["start"]).total_seconds()
+                task_lbl.configure(text=f"Working on:  {name}")
+                elapsed_lbl.configure(text=_fmt_duration(elapsed))
+            else:
+                task_lbl.configure(text="")
+                elapsed_lbl.configure(text="")
+            self._sleep_tick_id = self.after(1000, _tick_sleep)
+
+        win.bind("<Button-1>", _wake)
+        win.bind("<Key>",      _wake)
+        win.focus_set()
+        _tick_sleep()
 
     def _open_work_log(self, task_idx: int):
         """作業ログ一覧・削除ダイアログを開く。"""
@@ -5848,29 +7224,29 @@ class FolderLauncher(tk.Tk):
 
                 # 進捗バー（20文字幅）
                 bar_filled = int(pct / 5)
-                bar = "█" * bar_filled + "░" * (20 - bar_filled)
+                bar = "#" * bar_filled + "-" * (20 - bar_filled)
 
-                lines.append(f"  ▶ {process}")
-                lines.append(f"    進捗   : [{bar}] {pct}%")
+                lines.append(f"  {process}")
+                lines.append(f"    Progress : [{bar}] {pct}%")
 
                 if deadline:
                     dl_note = days_left(deadline)
-                    lines.append(f"    締切   : {deadline}  {dl_note}")
+                    lines.append(f"    Deadline : {deadline}  {dl_note}")
                 if updated:
-                    lines.append(f"    更新   : {updated}")
+                    lines.append(f"    Updated  : {updated}")
                 if content:
-                    # 内容は折り返して表示（60文字ごと）
+                    # Wrap content for display
                     for line in content.splitlines():
                         if line.strip():
-                            lines.append(f"    内容   : {line}")
+                            lines.append(f"    Content  : {line}")
                 if wfs:
                     for wf in wfs:
-                        lines.append(f"    フォルダ: {wf}")
+                        lines.append(f"    Folder   : {wf}")
                 if memos:
                     for memo in memos:
                         m_title   = memo.get("title", "Untitled")
                         m_content = memo.get("content", "").strip()
-                        lines.append(f"    メモ [{m_title}]")
+                        lines.append(f"    Memo [{m_title}]")
                         for ml in m_content.splitlines():
                             if ml.strip():
                                 lines.append(f"      {ml}")
@@ -5880,10 +7256,10 @@ class FolderLauncher(tk.Tk):
         subprocess.Popen(["notepad", save_path])
 
     def _open_memo(self, task_idx: int):
-        """タスクのメモ一覧・編集ウィンドウ（複数メモ対応）"""
+        """Memo list and edit window for a task (supports multiple memos)."""
         task = self._tasks[task_idx]
 
-        # 旧形式 "memo" (str) → "memos" (list) 移行
+        # Migrate legacy "memo" (str) → "memos" (list) format
         if "memo" in task and "memos" not in task:
             old = task.pop("memo", "")
             task["memos"] = ([{"title": "Memo", "content": old,
@@ -5898,7 +7274,7 @@ class FolderLauncher(tk.Tk):
         win.geometry("580x400")
         win.resizable(True, True)
 
-        # ── 左ペイン（メモ一覧）────────────────────────────
+        # ── Left pane (memo list) ──────────────────────────
         left = tk.Frame(win, bg=C["bg"], width=170)
         left.pack(side="left", fill="y", padx=(10, 0), pady=10)
         left.pack_propagate(False)
@@ -6082,7 +7458,7 @@ class FolderLauncher(tk.Tk):
 
             past_frame = tk.Frame(self._list_frame, bg=C["bg"])
 
-            arrow  = "▼" if self._notify_past_open else "▶"
+            arrow  = "v" if self._notify_past_open else ">"
             toggle = tk.Label(
                 self._list_frame,
                 text=f"{arrow}  Past  ({len(past)})",
@@ -6094,10 +7470,10 @@ class FolderLauncher(tk.Tk):
             def _toggle_past(lbl=toggle, frame=past_frame):
                 self._notify_past_open = not self._notify_past_open
                 if self._notify_past_open:
-                    lbl.configure(text=f"▼  Past  ({len(past)})")
+                    lbl.configure(text=f"v  Past  ({len(past)})")
                     frame.pack(fill="x")
                 else:
-                    lbl.configure(text=f"▶  Past  ({len(past)})")
+                    lbl.configure(text=f">  Past  ({len(past)})")
                     frame.pack_forget()
 
             toggle.bind("<Button-1>", lambda e: _toggle_past())
@@ -6171,7 +7547,7 @@ class FolderLauncher(tk.Tk):
                      font=FONT_SMALL, anchor="w").pack(fill="x")
 
         del_btn = tk.Button(
-            card, text="✕",
+            card, text="x",
             command=lambda i=idx: self._remove_notify_item(i),
             bg=card_bg, fg=C["btn_del"],
             relief="flat", bd=0,
@@ -6232,15 +7608,14 @@ class FolderLauncher(tk.Tk):
 
     def _show_theme_menu(self):
         menu = tk.Menu(self, tearoff=0)
-        labels = {"lavender": "Lavender", "dark": "Dark", "light": "Light", "gemini": "Gemini", "claude": "Claude", "devil": "Devil"}
+        labels = {"violet": "Violet", "dark": "Dark", "light": "Light", "gemini": "Gemini", "claude": "Claude", "scarlet": "Scarlet", "ocean": "Ocean", "rose": "Rose", "mint": "Mint"}
         for key, label in labels.items():
-            prefix = "✓ " if self._theme == key else "  "
+            prefix = "* " if self._theme == key else "  "
             menu.add_command(
                 label=prefix + label,
                 command=lambda k=key: self._apply_theme(k),
             )
-        btn = self._theme_btn
-        menu.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() + btn.winfo_height())
+        menu.tk_popup(self.winfo_pointerx(), self.winfo_pointery())
 
     def _apply_theme(self, theme_name: str):
         if theme_name not in THEMES:
@@ -6439,52 +7814,38 @@ class LoginWindow(tk.Tk):
         self.geometry(f"+{(sw - w) // 2}+{(sh - h) // 2}")
 
     def _build(self):
-        W = 260
-
-        # ── 薄い帯ヘッダー ──
-        cv = tk.Canvas(self, width=W, height=80,
-                       bg=C["accent_lt"], highlightthickness=0)
-        cv.pack(fill="x")
-        cv.create_oval(-20, -30, 90, 70,   fill="#D8D0F0", outline="")
-        cv.create_oval(190, 20,  300, 110, fill="#C8BAE8", outline="")
-        cv.create_text(W // 2, 42, text="Gem",
-                       fill=C["accent_dk"], font=("Segoe UI", 16, "bold"))
-
-        # ── 入力エリア ──
         inner = tk.Frame(self, bg=C["bg"])
-        inner.pack(fill="x", padx=18, pady=12)
+        inner.pack(fill="x", padx=24, pady=(24, 8))
 
         def _field(label_text, var, show=None):
             tk.Label(inner, text=label_text, bg=C["bg"], fg=C["text_sub"],
                      font=FONT_SMALL, anchor="w").pack(fill="x")
             kw = {"show": show} if show else {}
             e = tk.Entry(inner, textvariable=var, font=FONT,
-                         bg=C["card"], fg=C["text"], relief="flat", bd=0,
-                         insertbackground=C["accent"], width=20, **kw)
-            e.pack(fill="x", pady=(2, 0), ipady=4)
-            tk.Frame(inner, bg=C["accent_lt"], height=2).pack(fill="x", pady=(1, 8))
+                         bg=C["card"], fg=C["text"], relief="flat", bd=1,
+                         insertbackground=C["accent"], width=22, **kw)
+            e.pack(fill="x", pady=(2, 10), ipady=4)
             return e
 
         self._user_var = tk.StringVar()
-        _field("Username", self._user_var)
+        user_e = _field("Username", self._user_var)
+        user_e.focus_set()
 
         self._pw_var = tk.StringVar()
-        pw_e = _field("Password", self._pw_var, show="●")
+        pw_e = _field("Password", self._pw_var, show="*")
         pw_e.bind("<Return>", lambda e: self._login())
 
-        # エラーメッセージ
         self._err_var = tk.StringVar()
         tk.Label(self, textvariable=self._err_var,
                  bg=C["bg"], fg="#B84060",
                  font=FONT_SMALL).pack()
 
-        # ログインボタン
-        btn = tk.Button(self, text="Login  →", command=self._login,
+        btn = tk.Button(self, text="Login", command=self._login,
                         bg=C["accent"], fg="white", relief="flat", bd=0,
-                        font=("Segoe UI", 10, "bold"), cursor="hand2",
-                        padx=24, pady=6,
+                        font=FONT_BOLD, cursor="hand2",
+                        padx=28, pady=6,
                         activebackground=C["accent_dk"], activeforeground="white")
-        btn.pack(pady=(6, 16))
+        btn.pack(pady=(8, 20))
         btn.bind("<Enter>", lambda e: btn.configure(bg=C["accent_dk"]))
         btn.bind("<Leave>", lambda e: btn.configure(bg=C["accent"]))
 
@@ -6496,7 +7857,7 @@ class LoginWindow(tk.Tk):
             self.authenticated = True
             self.destroy()
         else:
-            self._err_var.set("✕  Invalid username or password")
+            self._err_var.set("Invalid username or password")
             self._pw_var.set("")
             self._shake()
 
@@ -6529,7 +7890,7 @@ def _preload_theme():
     """起動前に config.json からテーマだけ読み込んで C を更新する。"""
     try:
         cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
-        theme = cfg.get("theme", "lavender")
+        theme = cfg.get("theme", "violet")
         if theme in THEMES:
             C.update(THEMES[theme])
     except Exception:
