@@ -1,8 +1,9 @@
 """
-Gem — ラベンダー調マルチハブ
-フォルダ管理・ターミナル接続・タスク管理をまとめて扱う
+Gem — Lavender-toned multi-hub
+Unified management of folders, terminal connections, and tasks
 """
 
+import sys
 import tkinter as tk
 from tkinter import filedialog, messagebox, ttk, simpledialog
 import os
@@ -26,8 +27,11 @@ from pathlib import Path
 from PIL import ImageGrab, Image
 import pystray
 
-CONFIG_FILE   = Path(__file__).parent / "config.json"
-LOG_DIR       = Path(__file__).parent / "logs"
+# cx_Freeze などで凍結した場合は sys.executable の親ディレクトリを基準にする
+_BASE_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
+
+CONFIG_FILE   = _BASE_DIR / "config.json"
+LOG_DIR       = _BASE_DIR / "logs"
 TERATERM_EXE  = r"C:\Program Files\teraterm5\ttermpro.exe"
 
 C = {
@@ -47,7 +51,7 @@ C = {
 }
 
 THEMES: dict[str, dict] = {
-    "violet": {   # デフォルト（既存 C と同値）
+    "violet": {   # default (same as base C)
         "bg": "#EDE8F5", "card": "#F5F2FC", "card_h": "#DDD4F4",
         "accent": "#8B7CC8", "accent_dk": "#6A5BAA", "accent_lt": "#C4B8E8",
         "text": "#3A2D6E", "text_sub": "#7B6DB0", "border": "#C0B0E0",
@@ -68,82 +72,89 @@ THEMES: dict[str, dict] = {
         "tab_act": "#FFFFFF", "tab_inact": "#E8E8F8",
         "btn_del": "#DD8899", "btn_del_h": "#BB5566",
     },
-    "gemini": {   # Gemini風：クリーンホワイト + Google ブルー〜バイオレット
+    "gemini": {   # Gemini style: clean white + Google blue to violet
         "bg": "#F8F9FA", "card": "#FFFFFF", "card_h": "#E8F0FE",
         "accent": "#1B6EF3", "accent_dk": "#1251B5", "accent_lt": "#A8C7FA",
         "text": "#202124", "text_sub": "#5F6368", "border": "#DADCE0",
         "tab_act": "#FFFFFF", "tab_inact": "#F1F3F4",
         "btn_del": "#D93025", "btn_del_h": "#A50E0E",
     },
-    "claude": {   # Claude Code風：ほぼ黒 + コーラルオレンジ
+    "claude": {   # Claude Code style: near-black + coral orange
         "bg": "#1A1A1A", "card": "#242424", "card_h": "#2E2E2E",
         "accent": "#DA7756", "accent_dk": "#B85C3C", "accent_lt": "#E89A7A",
         "text": "#F0EDE8", "text_sub": "#9E9890", "border": "#383838",
         "tab_act": "#242424", "tab_inact": "#1E1E1E",
         "btn_del": "#8B3A3A", "btn_del_h": "#B04848",
     },
-    "scarlet": {   # 小悪魔：漆黒＋クリムゾンレッド
+    "scarlet": {   # Imp: jet black + crimson red
         "bg": "#1A0A0E", "card": "#240F14", "card_h": "#331520",
         "accent": "#CC2244", "accent_dk": "#991833", "accent_lt": "#E06078",
         "text": "#F5E8EA", "text_sub": "#C09098", "border": "#4A1A25",
         "tab_act": "#240F14", "tab_inact": "#1E0B10",
         "btn_del": "#882030", "btn_del_h": "#BB3045",
     },
-    "ocean": {   # 深海ブルー
+    "ocean": {   # deep sea blue
         "bg": "#0D1B2A", "card": "#1A2940", "card_h": "#243550",
         "accent": "#2196C4", "accent_dk": "#1570A0", "accent_lt": "#5BB8D4",
         "text": "#C8E8F5", "text_sub": "#7AAFC8", "border": "#2A4060",
         "tab_act": "#1A2940", "tab_inact": "#152030",
         "btn_del": "#8B3A3A", "btn_del_h": "#B04848",
     },
-    "rose": {   # ローズピンク
+    "rose": {   # rose pink
         "bg": "#FDF0F3", "card": "#FFFFFF", "card_h": "#FFE4EC",
         "accent": "#E0608A", "accent_dk": "#C0407A", "accent_lt": "#F0A0BC",
         "text": "#4A1A2A", "text_sub": "#A06080", "border": "#F0C0D0",
         "tab_act": "#FFFFFF", "tab_inact": "#FAE0E8",
         "btn_del": "#E06080", "btn_del_h": "#C04060",
     },
-    "mint": {   # ミントグリーン
+    "mint": {   # mint green
         "bg": "#F0FAF5", "card": "#FFFFFF", "card_h": "#D8F5E8",
         "accent": "#3DAA78", "accent_dk": "#2A8A60", "accent_lt": "#80CCA8",
         "text": "#1A3A28", "text_sub": "#5A8A70", "border": "#B0E0C8",
         "tab_act": "#FFFFFF", "tab_inact": "#E0F5EC",
         "btn_del": "#C06060", "btn_del_h": "#A04040",
     },
-    "peach": {   # ピーチ：暖かみのあるオレンジ〜ピンクパステル
+    "peach": {   # peach: warm orange to pink pastel
         "bg": "#FFF5EE", "card": "#FFFAF7", "card_h": "#FFE8D8",
         "accent": "#E8845A", "accent_dk": "#C86030", "accent_lt": "#F5C0A0",
         "text": "#4A2010", "text_sub": "#A06848", "border": "#F5D0B8",
         "tab_act": "#FFFAF7", "tab_inact": "#FFE8D8",
         "btn_del": "#D05050", "btn_del_h": "#A83030",
     },
-    "sky": {   # スカイブルー：さわやかな水色パステル
+    "sky": {   # sky blue: refreshing light blue pastel
         "bg": "#EEF7FF", "card": "#F5FBFF", "card_h": "#D4EDFF",
         "accent": "#4DA8DA", "accent_dk": "#2A88BE", "accent_lt": "#9DD4F0",
         "text": "#0C2C44", "text_sub": "#4A80A8", "border": "#B0D8F0",
         "tab_act": "#F5FBFF", "tab_inact": "#DCF0FF",
         "btn_del": "#C05870", "btn_del_h": "#A03858",
     },
-    "lemon": {   # レモン：明るく元気なイエローパステル
+    "lemon": {   # lemon: bright and cheerful yellow pastel
         "bg": "#FDFCE8", "card": "#FFFFF0", "card_h": "#F5F0B8",
         "accent": "#C8A800", "accent_dk": "#A08800", "accent_lt": "#E8D870",
         "text": "#383000", "text_sub": "#787040", "border": "#E8DC90",
         "tab_act": "#FFFFF0", "tab_inact": "#F5EEC0",
         "btn_del": "#C06040", "btn_del_h": "#A04020",
     },
-    "lavender": {   # ラベンダー：やさしい紫パステル（violetより淡め）
+    "lavender": {   # lavender: soft purple pastel (lighter than violet)
         "bg": "#F3F0FF", "card": "#FAF8FF", "card_h": "#E4DEFF",
         "accent": "#9B88D8", "accent_dk": "#7A66C0", "accent_lt": "#C8BCEE",
         "text": "#2E2460", "text_sub": "#7868B0", "border": "#D0C8F0",
         "tab_act": "#FAF8FF", "tab_inact": "#E8E0FF",
         "btn_del": "#C888B0", "btn_del_h": "#A86898",
     },
-    "sakura": {   # サクラ：桜色の淡いピンク
+    "sakura": {   # sakura: cherry blossom soft pink
         "bg": "#FFF0F5", "card": "#FFF8FA", "card_h": "#FFD8E8",
         "accent": "#E87898", "accent_dk": "#C85878", "accent_lt": "#F5B0C8",
         "text": "#4A1828", "text_sub": "#A06888", "border": "#F0C0D4",
         "tab_act": "#FFF8FA", "tab_inact": "#FFE0EC",
         "btn_del": "#D05878", "btn_del_h": "#B03858",
+    },
+    "plush": {   # ぬいぐるみ調 soft periwinkle lavender
+        "bg": "#EAE5F8", "card": "#F5F2FF", "card_h": "#DAD2F8",
+        "accent": "#9E92D6", "accent_dk": "#7C6FBF", "accent_lt": "#C6BEE8",
+        "text": "#2A2055", "text_sub": "#6E65A5", "border": "#C8C0E8",
+        "tab_act": "#F5F2FF", "tab_inact": "#E0DAF8",
+        "btn_del": "#C88AB8", "btn_del_h": "#A86898",
     },
 }
 
@@ -232,17 +243,39 @@ ICON_PALETTES: dict[str, dict] = {
         "MD":  (200,  88, 120, 255), "DK": (140,  45,  80, 255),
         "SP":  (250, 195, 220, 210),
     },
+    "plush": {
+        "BDR": ( 50,  40, 100, 255), "HL": (232, 228, 245, 255),
+        "LT":  (208, 202, 234, 255), "F":  (181, 173, 220, 255),
+        "MD":  (144, 136, 190, 255), "DK": (104,  96, 160, 255),
+        "SP":  (210, 205, 238, 210),
+    },
 }
 
-FONT       = ("Segoe UI", 10)
-FONT_BOLD  = ("Segoe UI", 10, "bold")
-FONT_SMALL = ("Segoe UI", 8)
+FONT_BASE  = 11  # ベースフォントサイズ（設定で変更可能）
+FONT       = ("Segoe UI", 11)
+FONT_BOLD  = ("Segoe UI", 11, "bold")
+FONT_SMALL = ("Segoe UI", 9)
 
-CLIP_MAX = 50   # クリップボード履歴の最大保持件数
+
+def _update_fonts(size: int):
+    """グローバルフォントをベースサイズに合わせて更新する。"""
+    global FONT_BASE, FONT, FONT_BOLD, FONT_SMALL
+    FONT_BASE  = size
+    FONT       = ("Segoe UI", size)
+    FONT_BOLD  = ("Segoe UI", size, "bold")
+    FONT_SMALL = ("Segoe UI", max(7, size - 2))
+
+CLIP_MAX = 50   # maximum number of clipboard history entries to retain
+
+
+def _pbar(pct: int, width: int = 10) -> str:
+    """Convert a progress percentage to a block-character progress bar string."""
+    filled = round(pct * width / 100)
+    return "█" * filled + "░" * (width - filled)
 
 
 def _fmt_duration(seconds: float) -> str:
-    """秒数を '2h 30m' 形式の文字列に変換する。"""
+    """Convert seconds to a string in '2h 30m' format."""
     seconds = int(seconds)
     h, m = divmod(seconds // 60, 60)
     if h:
@@ -250,103 +283,127 @@ def _fmt_duration(seconds: float) -> str:
     return f"{m}m"
 
 
+def _draw_rounded_rect(canvas, x1, y1, x2, y2, r, **kw):
+    """Canvasに角丸長方形を塗りつぶして描画する。"""
+    kw.setdefault("outline", "")
+    r = max(1, min(r, (x2 - x1) // 2, (y2 - y1) // 2))
+    for ax, ay, start in (
+        (x1,      y1,      90),
+        (x2-2*r,  y1,       0),
+        (x1,      y2-2*r, 180),
+        (x2-2*r,  y2-2*r, 270),
+    ):
+        canvas.create_arc(ax, ay, ax+2*r, ay+2*r,
+                          start=start, extent=90, style="pieslice", **kw)
+    canvas.create_rectangle(x1+r, y1, x2-r, y2, **kw)
+    canvas.create_rectangle(x1, y1+r, x2, y2-r, **kw)
+
+
 # ── Icon generation ───────────────────────────────────────
 
 def _make_icon_png(palette: dict | None = None) -> str:
-    """輪郭線付きクラゲアイコン PNG を生成して Base64 返却する。"""
+    """うさぎ耳クラゲアイコン PNG を生成して Base64 で返す。"""
     p = palette or ICON_PALETTES["violet"]
     W, H = 32, 32
-    T   = (  0,   0,   0,   0)  # transparent
-    BDR = p["BDR"]               # dark outline
-    WH  = (255, 254, 255, 255)  # shine white（常に白）
-    HL  = p["HL"]                # highlight
-    LT  = p["LT"]                # light
-    F   = p["F"]                 # main
-    MD  = p["MD"]                # mid shadow
-    DK  = p["DK"]                # deep shadow
-    SP  = p["SP"]                # sparkle
+    T   = (  0,   0,   0,   0)
+    BDR = p["BDR"]
+    HL  = p["HL"]
+    LT  = p["LT"]
+    F   = p["F"]
+    MD  = p["MD"]
 
-    # クラゲのベル（頭部）輪郭 {y: (x_left, x_right)} 両端含む
+    # ── ベル（頭部）: 真円 center=(15,12) r=10 ──────────────────
     BELL = {
-         2: (13, 18),  # 頂点
-         3: (10, 21),
-         4: (8,  23),
-         5: (6,  25),
-         6: (4,  27),
-         7: (3,  28),
-         8: (2,  29),
-         9: (2,  29),
-        10: (2,  29),
-        11: (2,  29),
-        12: (3,  28),
-        13: (4,  27),
-        14: (5,  26),  # ベル底部
+         3: (11, 19),
+         4: ( 9, 21),
+         5: ( 8, 22),
+         6: ( 7, 23),
+         7: ( 6, 24),
+         8: ( 6, 24),
+         9: ( 5, 25),
+        10: ( 5, 25),
+        11: ( 5, 25),
+        12: ( 5, 25),
+        13: ( 5, 25),
+        14: ( 5, 25),
+        15: ( 5, 25),
+        16: ( 6, 24),
+        17: ( 6, 24),
+        18: ( 7, 23),
+        19: ( 8, 22),
+        20: ( 9, 21),
+        21: (11, 19),
     }
 
-    def in_bell(x, y):
-        if y not in BELL: return False
-        lo, hi = BELL[y]
-        return lo <= x <= hi
+    def _in_d(d, x, y):
+        if y not in d: return False
+        lo, hi = d[y]; return lo <= x <= hi
 
+    def in_bell(x, y):  return _in_d(BELL, x, y)
     def is_bell_edge(x, y):
         if not in_bell(x, y): return False
-        return any(not in_bell(x+dx, y+dy)
+        return any(not in_bell(x+dx, y+dy) for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)))
+
+    # ── 耳（幅広の丸耳） ────────────────────────────────────────
+    L_EAR    = {0: ( 8,12), 1: ( 7,13), 2: ( 7,13), 3: ( 7,13), 4: ( 8,12)}
+    R_EAR    = {0: (18,22), 1: (17,23), 2: (17,23), 3: (17,23), 4: (18,22)}
+    L_EAR_IN = {0: ( 9,11), 1: ( 8,12), 2: ( 8,12), 3: ( 8,12)}
+    R_EAR_IN = {0: (19,21), 1: (18,22), 2: (18,22), 3: (18,22)}
+
+    def in_ear(x, y):    return _in_d(L_EAR, x, y) or _in_d(R_EAR, x, y)
+    def ear_inner(x, y): return _in_d(L_EAR_IN, x, y) or _in_d(R_EAR_IN, x, y)
+    def is_ear_edge(x, y):
+        if not in_ear(x, y): return False
+        return any(not in_ear(x+dx, y+dy) and not in_bell(x+dx, y+dy)
                    for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)))
 
-    # 触手ピクセル（5本、波打ちながら下に伸びる）
+    # ── 触手（5本、短め、わずかに広がる） ────────────────────────
     TENTACLE: set[tuple[int, int]] = set()
     TENTACLE_EDGE: set[tuple[int, int]] = set()
-    for base_x in (7, 11, 15, 19, 23):
-        for dy in range(14):
-            y = 15 + dy
+    for base_x, drift in ((7, -1), (12, 0), (17, 0), (22, 1)):
+        for dy in range(5):
+            y = 22 + dy
             if y >= H: break
-            wave = (dy // 2) % 2
-            x = base_x + wave
+            x = base_x + drift * (dy // 3)
             TENTACLE.add((x, y))
-            TENTACLE.add((x + 1, y))  # 2px 幅で視認性確保
-    # 触手の輪郭（隣接する透明ピクセルのみ）
+            TENTACLE.add((x + 1, y))
     for tx, ty in TENTACLE:
         for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)):
             nx, ny = tx+dx, ty+dy
             if 0 <= nx < W and 0 <= ny < H and (nx, ny) not in TENTACLE:
                 TENTACLE_EDGE.add((nx, ny))
 
-    # 光沢スポット（左上ベル内部）
-    SHINE    = {(12,4),(13,4),(11,5),(12,5)}
-    SHINE_HL = {(14,4),(11,6),(12,6),(13,6)}
-
     def px(x, y):
-        # 触手本体
         if (x, y) in TENTACLE:
             return F
-        # 触手輪郭（ベル領域と重ならない部分のみ）
-        if (x, y) in TENTACLE_EDGE and not in_bell(x, y):
+        if (x, y) in TENTACLE_EDGE and not in_bell(x, y) and not in_ear(x, y):
             return BDR
+        # 耳（フラット: エッジはBDR、内耳はLT、それ以外はF）
+        if in_ear(x, y):
+            if is_ear_edge(x, y): return BDR
+            if ear_inner(x, y):   return LT
+            return F
         if not in_bell(x, y):
             return T
-        # 光沢 → 輪郭 → グラデーション の順に判定
-        if (x, y) in SHINE:       return WH
-        if (x, y) in SHINE_HL:    return HL
-        if is_bell_edge(x, y):    return BDR
+        # ベル（淡い立体感: 上部中央〜左にハイライト、下部に軽いシャドウ）
+        if is_bell_edge(x, y): return BDR
         dx = x - 15
-        if y <= 6:    # 頂部: 明るく
-            if dx <= -4: return LT
-            if dx >= 4:  return F
-            return HL
-        if y <= 10:   # 中部
-            if dx <= -4: return HL
-            if dx >= 4:  return F
+        if y <= 12 and dx <= 1:
             return LT
-        # 底部: やや暗め
-        if dx <= -3: return MD
-        if dx >= 3:  return F
-        return MD
+        if y >= 18:
+            return MD
+        return F
+
+    # 32×32 で描画してから 2× (64×64) にスケールアップ
+    OUT = 2
+    W_OUT, H_OUT = W * OUT, H * OUT
+    pixels = [[px(x, y) for x in range(W)] for y in range(H)]
 
     raw = b''
-    for y in range(H):
+    for oy in range(H_OUT):
         raw += b'\x00'
-        for x in range(W):
-            raw += bytes(px(x, y))
+        for ox in range(W_OUT):
+            raw += bytes(pixels[oy // OUT][ox // OUT])
 
     def chunk(tag, data):
         c = tag + data
@@ -354,31 +411,35 @@ def _make_icon_png(palette: dict | None = None) -> str:
 
     png = (
         b'\x89PNG\r\n\x1a\n'
-        + chunk(b'IHDR', struct.pack('>IIBBBBB', W, H, 8, 6, 0, 0, 0))
+        + chunk(b'IHDR', struct.pack('>IIBBBBB', W_OUT, H_OUT, 8, 6, 0, 0, 0))
         + chunk(b'IDAT', zlib.compress(raw, 9))
         + chunk(b'IEND', b'')
     )
     return base64.b64encode(png).decode()
 
 
-_gem_ico_path: str | None = None  # 全 Toplevel に自動適用するため保持
+_gem_ico_path: str | None = None  # retained for automatic application to all Toplevels
 
 
 def _setup_taskbar_icon(root: tk.Tk, palette: dict | None = None) -> None:
-    """AppUserModelID を設定し、ICO ファイルでタスクバーアイコンを適用する。"""
+    """Set AppUserModelID and apply the taskbar icon from an ICO file."""
     global _gem_ico_path
     try:
         ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("Gem.Launcher.1")
     except Exception:
         pass
 
-    ico_path = Path(__file__).parent / "gem.ico"
-    # パレット指定時（テーマ変更）は常に再生成、初回はスクリプト更新時のみ
+    ico_path = _BASE_DIR / "gem.ico"
+    # Always regenerate when a palette is specified (theme change); on first run only if the script was updated
     force = palette is not None
     if not force:
-        script_mtime = Path(__file__).stat().st_mtime
-        ico_mtime    = ico_path.stat().st_mtime if ico_path.exists() else 0
-        force = not ico_path.exists() or script_mtime > ico_mtime
+        if getattr(sys, "frozen", False):
+            # 凍結実行ファイルではスクリプト自体が存在しないので mtime 比較をスキップ
+            force = not ico_path.exists()
+        else:
+            script_mtime = Path(__file__).stat().st_mtime
+            ico_mtime    = ico_path.stat().st_mtime if ico_path.exists() else 0
+            force = not ico_path.exists() or script_mtime > ico_mtime
     if force:
         try:
             from PIL import Image
@@ -397,11 +458,11 @@ def _setup_taskbar_icon(root: tk.Tk, palette: dict | None = None) -> None:
             except Exception:
                 pass
         _apply()
-        # ウィンドウ表示後に確実に適用（タイミングずれ対策）
+        # Re-apply after window is shown to handle timing issues
         root.after(200, _apply)
 
 
-# Toplevel 生成時に自動でアイコンを適用するモンキーパッチ
+# Monkey-patch to automatically apply the icon when a Toplevel is created
 _orig_toplevel_init = tk.Toplevel.__init__
 
 def _patched_toplevel_init(self, master=None, **kwargs):
@@ -464,7 +525,7 @@ def _launch_teraterm(conn: dict):
     charset = conn.get("charset", "UTF-8")
     charset_arg = [f"/KT={charset}"] if charset else []
 
-    # ログファイルを自動生成
+    # Auto-generate log file
     LOG_DIR.mkdir(exist_ok=True)
     timestamp = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
     log_path = LOG_DIR / f"{timestamp}_{host}.log"
@@ -473,10 +534,10 @@ def _launch_teraterm(conn: dict):
     PROMPT = "wait '$' '#' '%' '>'"
 
     def _ttl_sendln(s: str) -> list[str]:
-        """TTL の sendln コードを生成する。シングルクォートを含む場合も正しく処理する。"""
+        """Generate TTL sendln code. Handles strings containing single quotes correctly."""
         if "'" not in s:
             return [f"sendln '{s}'"]
-        # シングルクォートを strconcat + char2str(39) で組み立てる
+        # Build the string with single quotes using strconcat + char2str(39)
         parts = s.split("'")
         lines = [f"_s = '{parts[0]}'"]
         for part in parts[1:]:
@@ -487,14 +548,14 @@ def _launch_teraterm(conn: dict):
         return lines
 
     def _write_ttl(lines: list[str]) -> str:
-        """TTL スクリプトを一時ファイルに書き出してパスを返す。"""
+        """Write a TTL script to a temporary file and return its path."""
         with tempfile.NamedTemporaryFile(mode="w", suffix=".ttl",
                                          delete=False, encoding="utf-8") as f:
             f.write("\r\n".join(lines) + "\r\n")
             return f.name
 
     if proto == "SSH":
-        # SSH: CLI引数でuser/pass渡し、コマンドがあればTTLでプロンプト待機
+        # SSH: pass user/pass via CLI arguments; use TTL to wait for prompt if commands are specified
         if cmds:
             ttl_lines = [
                 "timeout = 30",
@@ -513,12 +574,12 @@ def _launch_teraterm(conn: dict):
             f"/user={user}",
             f"/passwd={pw}",
         ] + charset_arg + log_arg + ttl_arg
-    else:  # Telnet: TTLスクリプトでlogin/passwordプロンプトに自動入力
+    else:  # Telnet: auto-fill login/password prompts via TTL script
         ttl_lines = [
             "timeout = 30",
-            # login: / Login: / Username: / User: など各機器のプロンプトに対応
+            # Handles various device prompts: login: / Login: / Username: / User:
             "wait 'ogin:' 'sername:' 'ser:'",
-            "mpause 300",   # プロンプト受信後、機器が入力待ちになるまで少し待つ
+            "mpause 300",   # Wait a moment after receiving the prompt for the device to be ready for input
         ] + _ttl_sendln(user) + [
             "wait 'assword:'",
             "mpause 300",
@@ -556,12 +617,12 @@ def _launch_rdp(conn: dict):
 
 def _launch_smb(conn: dict):
     """Open Windows SMB share (UNC path) in Explorer."""
-    unc  = conn["host"]   # \\server\share 形式
+    unc  = conn["host"]   # \\server\share format
     user = conn.get("user", "")
     pw   = _decode_pw(conn.get("password", ""))
 
     if user and pw:
-        # 資格情報を一時登録してからアクセス
+        # Temporarily register credentials before accessing
         subprocess.run(
             ["net", "use", unc, pw, f"/user:{user}"],
             creationflags=subprocess.CREATE_NO_WINDOW,
@@ -640,7 +701,7 @@ class ConnectionDialog(tk.Toplevel):
         )
         self._pw_toggle.grid(row=5, column=2, padx=(0, 4), pady=3)
 
-        # 文字コード選択
+        # charset selection
         self._charset_lbl = tk.Label(self._form, text="Charset", bg=C["bg"], fg=C["text_sub"],
                                      font=FONT_SMALL, anchor="e", width=10)
         self._charset_lbl.grid(row=6, column=0, padx=(12, 4), pady=3, sticky="e")
@@ -651,7 +712,7 @@ class ConnectionDialog(tk.Toplevel):
         )
         self._charset_combo.grid(row=6, column=1, padx=(0, 12), pady=3, sticky="ew")
 
-        # グループ選択
+        # group selection
         tk.Label(self._form, text="Group", bg=C["bg"], fg=C["text_sub"],
                  font=FONT_SMALL, anchor="e", width=10).grid(
                      row=7, column=0, padx=(12, 4), pady=3, sticky="e")
@@ -702,7 +763,7 @@ class ConnectionDialog(tk.Toplevel):
     def _import_cmd_file(self):
         path = filedialog.askopenfilename(
             parent=self,
-            title="コマンドファイルを選択",
+            title="Select command file",
             filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
         )
         if not path:
@@ -712,7 +773,7 @@ class ConnectionDialog(tk.Toplevel):
         except Exception as e:
             messagebox.showerror("Import Error", str(e), parent=self)
             return
-        # 既存の内容に追記（末尾に空行を挟む）
+        # Append to existing content (with a blank line separator)
         current = self._cmd_text.get("1.0", "end-1c").rstrip("\n")
         new_lines = text.rstrip("\n")
         merged = (current + "\n" + new_lines) if current else new_lines
@@ -740,7 +801,7 @@ class ConnectionDialog(tk.Toplevel):
                 w.grid_remove()
             else:
                 w.grid()
-        # CharsetはSSH/Telnetのみ表示
+        # Charset is shown for SSH/Telnet only
         for w in (self._charset_lbl, self._charset_combo):
             if is_smb or is_rdp:
                 w.grid_remove()
@@ -777,7 +838,7 @@ class ConnectionDialog(tk.Toplevel):
 # ── Bookmark dialog ───────────────────────────────────────
 
 class BookmarkDialog(tk.Toplevel):
-    """ブックマークの追加・編集ダイアログ。"""
+    """Dialog for adding/editing bookmarks."""
 
     def __init__(self, parent, initial: dict | None = None):
         super().__init__(parent)
@@ -864,7 +925,7 @@ class TaskDialog(tk.Toplevel):
             _wf = [d["work_folder"]]
         self._work_folders_list: list = list(_wf)
 
-        # deadline スピンボックス初期値
+        # deadline spinbox initial values
         dl_str = d.get("deadline", "")
         try:
             _dl = datetime.date.fromisoformat(dl_str)
@@ -897,7 +958,7 @@ class TaskDialog(tk.Toplevel):
         self._form = tk.Frame(self, bg=C["bg"])
         self._form.pack(padx=4, pady=(12, 4))
 
-        # Event: コンボボックス（既存イベント名から選択 or 直接入力）
+        # Event: combobox (select from existing event names or type directly)
         tk.Label(self._form, text="Event", bg=C["bg"], fg=C["text_sub"],
                  font=FONT_SMALL, anchor="e", width=9).grid(
                      row=0, column=0, padx=(12, 4), pady=3, sticky="e")
@@ -947,7 +1008,7 @@ class TaskDialog(tk.Toplevel):
                          showvalue=False, resolution=5)
         scale.pack(side="left", fill="x", expand=True)
 
-        # deadline input (スピンボックス分割 + チェックボックス)
+        # deadline input (split spinboxes + checkbox)
         tk.Label(self._form, text="Deadline", bg=C["bg"], fg=C["text_sub"],
                  font=FONT_SMALL, anchor="e", width=9).grid(
                      row=4, column=0, padx=(12, 4), pady=(6, 3), sticky="e")
@@ -984,7 +1045,7 @@ class TaskDialog(tk.Toplevel):
         self._dl_spinboxes = [sp_y, sp_m, sp_d]
         self._toggle_deadline()
 
-        # work folders (複数)
+        # work folders (multiple)
         tk.Label(self._form, text="Folders", bg=C["bg"], fg=C["text_sub"],
                  font=FONT_SMALL, anchor="ne", width=9).grid(
                      row=5, column=0, padx=(12, 4), pady=3, sticky="ne")
@@ -1088,10 +1149,169 @@ class TaskDialog(tk.Toplevel):
         self.destroy()
 
 
+# ── Subtask dialog ─────────────────────────────────────────
+
+class SubtaskDialog(tk.Toplevel):
+    """Dialog for adding/editing subtasks."""
+
+    def __init__(self, parent, initial: dict | None = None):
+        super().__init__(parent)
+        self.title("Add Subtask" if initial is None else "Edit Subtask")
+        self.configure(bg=C["bg"])
+        self.resizable(False, False)
+        self.grab_set()
+        self.result: dict | None = None
+
+        d = initial or {}
+        self._title_var    = tk.StringVar(value=d.get("title", ""))
+        self._progress_var = tk.IntVar(value=d.get("progress", 0))
+        self._done_var     = tk.BooleanVar(value=d.get("done", False))
+
+        dl_str = d.get("deadline", "")
+        try:
+            _dl = datetime.date.fromisoformat(dl_str)
+        except ValueError:
+            _dl = datetime.date.today()
+        self._use_deadline = tk.BooleanVar(value=bool(dl_str))
+        self._dl_year  = tk.IntVar(value=_dl.year)
+        self._dl_month = tk.IntVar(value=_dl.month)
+        self._dl_day   = tk.IntVar(value=_dl.day)
+        self._dl_spinboxes: list = []
+
+        self._build()
+        self.update_idletasks()
+        px = parent.winfo_x() + (parent.winfo_width()  - self.winfo_width())  // 2
+        py = parent.winfo_y() + (parent.winfo_height() - self.winfo_height()) // 2
+        self.geometry(f"+{px}+{py}")
+        self.wait_window()
+
+    def _build(self):
+        form = tk.Frame(self, bg=C["bg"])
+        form.pack(padx=4, pady=(12, 4))
+
+        def _lbl(text, row):
+            tk.Label(form, text=text, bg=C["bg"], fg=C["text_sub"],
+                     font=FONT_SMALL, anchor="e", width=9).grid(
+                         row=row, column=0, padx=(12, 4), pady=3, sticky="e")
+
+        # title
+        _lbl("Title", 0)
+        e = tk.Entry(form, textvariable=self._title_var, font=FONT,
+                     bg=C["card"], fg=C["text"], relief="flat", bd=1,
+                     insertbackground=C["accent"], width=26)
+        e.grid(row=0, column=1, padx=(0, 12), pady=3, sticky="ew")
+        e.focus_set()
+
+        # Done checkbox
+        _lbl("Done", 1)
+        def _on_done():
+            if self._done_var.get():
+                self._progress_var.set(100)
+                self._pct_label.configure(text="100%")
+            else:
+                if self._progress_var.get() == 100:
+                    self._progress_var.set(0)
+                    self._pct_label.configure(text="0%")
+        tk.Checkbutton(form, variable=self._done_var, command=_on_done,
+                       bg=C["bg"], fg=C["text"], selectcolor=C["bg"],
+                       activebackground=C["bg"], cursor="hand2",
+                       ).grid(row=1, column=1, padx=(0, 12), pady=3, sticky="w")
+
+        # progress slider
+        _lbl("Progress", 2)
+        slider_frame = tk.Frame(form, bg=C["bg"])
+        slider_frame.grid(row=2, column=1, padx=(0, 12), pady=3, sticky="ew")
+        self._pct_label = tk.Label(slider_frame, text=f"{self._progress_var.get()}%",
+                                   bg=C["bg"], fg=C["accent"], font=FONT_BOLD, width=4)
+        self._pct_label.pack(side="right")
+        def _on_scale(v):
+            pct = int(float(v))
+            self._pct_label.configure(text=f"{pct}%")
+            self._done_var.set(pct == 100)
+        tk.Scale(slider_frame, variable=self._progress_var,
+                 from_=0, to=100, orient="horizontal", command=_on_scale,
+                 bg=C["bg"], fg=C["text"], troughcolor=C["border"],
+                 activebackground=C["accent_lt"],
+                 highlightthickness=0, bd=0, showvalue=False, resolution=5,
+                 ).pack(side="left", fill="x", expand=True)
+
+        # deadline
+        _lbl("Deadline", 3)
+        dl_outer = tk.Frame(form, bg=C["bg"])
+        dl_outer.grid(row=3, column=1, padx=(0, 12), pady=3, sticky="ew")
+        tk.Checkbutton(dl_outer, text="Set",
+                       variable=self._use_deadline, command=self._toggle_deadline,
+                       bg=C["bg"], fg=C["text_sub"], selectcolor=C["bg"],
+                       activebackground=C["bg"], font=FONT_SMALL,
+                       cursor="hand2").pack(side="left")
+        dl_spin_frame = tk.Frame(dl_outer, bg=C["bg"])
+        dl_spin_frame.pack(side="left", padx=(8, 0))
+        _spin_cfg = dict(font=FONT, bg=C["card"], fg=C["text"], relief="flat", bd=1,
+                         buttonbackground=C["accent_lt"],
+                         insertbackground=C["accent"], wrap=True)
+        def _dl_lbl(t):
+            return tk.Label(dl_spin_frame, text=t, bg=C["bg"],
+                            fg=C["text_sub"], font=FONT_SMALL)
+        sp_y = tk.Spinbox(dl_spin_frame, textvariable=self._dl_year,
+                          from_=2020, to=2099, width=5, **_spin_cfg)
+        sp_y.pack(side="left")
+        _dl_lbl("/").pack(side="left")
+        sp_m = tk.Spinbox(dl_spin_frame, textvariable=self._dl_month,
+                          from_=1, to=12, width=3, **_spin_cfg)
+        sp_m.pack(side="left")
+        _dl_lbl("/").pack(side="left")
+        sp_d = tk.Spinbox(dl_spin_frame, textvariable=self._dl_day,
+                          from_=1, to=31, width=3, **_spin_cfg)
+        sp_d.pack(side="left")
+        self._dl_spinboxes = [sp_y, sp_m, sp_d]
+        self._toggle_deadline()
+
+        # buttons
+        btn_frame = tk.Frame(self, bg=C["bg"])
+        btn_frame.pack(fill="x", padx=16, pady=(4, 14))
+        tk.Button(btn_frame, text="Save", command=self._ok,
+                  bg=C["accent"], fg="white", relief="flat", bd=0,
+                  font=FONT_BOLD, cursor="hand2", padx=16, pady=4,
+                  activebackground=C["accent_dk"], activeforeground="white",
+                  ).pack(side="right", padx=(4, 0))
+        tk.Button(btn_frame, text="Cancel", command=self.destroy,
+                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  font=FONT, cursor="hand2", padx=10, pady=4,
+                  activebackground=C["border"], activeforeground=C["text"],
+                  ).pack(side="right")
+
+    def _toggle_deadline(self):
+        state, bg = ("normal", C["card"]) if self._use_deadline.get() else ("disabled", C["border"])
+        for sp in self._dl_spinboxes:
+            sp.configure(state=state, bg=bg)
+
+    def _ok(self):
+        title = self._title_var.get().strip()
+        if not title:
+            messagebox.showwarning("Input Error", "Title is required.", parent=self)
+            return
+        deadline = ""
+        if self._use_deadline.get():
+            try:
+                dl = datetime.date(self._dl_year.get(), self._dl_month.get(),
+                                   self._dl_day.get())
+                deadline = dl.isoformat()
+            except ValueError as e:
+                messagebox.showwarning("Input Error", f"Invalid deadline:\n{e}", parent=self)
+                return
+        self.result = {
+            "title":    title,
+            "progress": self._progress_var.get(),
+            "done":     self._done_var.get(),
+            "deadline": deadline,
+        }
+        self.destroy()
+
+
 # ── Gantt chart window ────────────────────────────────────
 
 class GanttWindow(tk.Toplevel):
-    """タスクをガントチャートで可視化するウィンドウ。"""
+    """Window for visualizing tasks as a Gantt chart."""
 
     ROW_H = 28
     HDR_H = 50
@@ -1107,7 +1327,7 @@ class GanttWindow(tk.Toplevel):
         self._tasks = tasks
         self._build()
 
-    # ── 日付ユーティリティ ──
+    # ── Date utilities ──
 
     @staticmethod
     def _parse_date(s: str) -> datetime.date | None:
@@ -1116,7 +1336,7 @@ class GanttWindow(tk.Toplevel):
         except (ValueError, TypeError):
             return None
 
-    # ── 進捗率→色 ──
+    # ── Progress percentage -> color ──
 
     @staticmethod
     def _bar_color(pct: int) -> str:
@@ -1125,7 +1345,7 @@ class GanttWindow(tk.Toplevel):
         if pct >= 34:  return "#FFF3BC"
         return "#FFAAAA"
 
-    # ── ビルド ──
+    # ── Build ──
 
     def _build(self):
         if not self._tasks:
@@ -1135,12 +1355,12 @@ class GanttWindow(tk.Toplevel):
 
         today = datetime.date.today()
 
-        # グループ化
+        # Grouping
         groups: dict[str, list[dict]] = {}
         for t in self._tasks:
             groups.setdefault(t["event"], []).append(t)
 
-        # 日付範囲
+        # Date range
         dates: list[datetime.date] = [today]
         for t in self._tasks:
             for key in ("created_at", "deadline"):
@@ -1151,16 +1371,16 @@ class GanttWindow(tk.Toplevel):
         max_date = max(dates) + datetime.timedelta(days=21)
         total_days = (max_date - min_date).days or 1
 
-        # ピクセル/日（ウィンドウ幅に合わせて自動調整）
+        # Pixels per day (auto-adjusted to window width)
         bar_area = 900 - self.LBL_W - 20
         day_w = max(4, min(24, bar_area // total_days))
 
-        # キャンバスサイズ
+        # Canvas size
         n_rows = len(self._tasks) + len(groups)
         cw = self.LBL_W + total_days * day_w + 10
         ch = self.HDR_H + n_rows * self.ROW_H + 10
 
-        # レイアウト
+        # Layout
         outer = tk.Frame(self, bg=C["bg"])
         outer.pack(fill="both", expand=True, padx=4, pady=4)
         h_sb = tk.Scrollbar(outer, orient="horizontal")
@@ -1176,17 +1396,17 @@ class GanttWindow(tk.Toplevel):
         cv.bind("<MouseWheel>",
                 lambda e: cv.yview_scroll(-1 * (e.delta // 120), "units"))
 
-        # 描画
+        # Drawing
         self._draw_header(cv, min_date, max_date, day_w, cw)
         self._draw_rows(cv, groups, min_date, day_w, today, cw, ch)
 
-        # 今日線
+        # Today line
         tx = self.LBL_W + (today - min_date).days * day_w
         cv.create_line(tx, 0, tx, ch, fill="#C04040", width=1, dash=(5, 3))
         cv.create_text(tx + 3, self.HDR_H - 4,
                        text="Today", fill="#C04040", font=FONT_SMALL, anchor="sw")
 
-        # 今日位置へスクロール
+        # Scroll to today's position
         cv.after(80, lambda: cv.xview_moveto(max(0.0, (tx - 220) / cw)))
 
     def _draw_header(self, cv, min_date, max_date, day_w, cw):
@@ -1198,7 +1418,7 @@ class GanttWindow(tk.Toplevel):
                        text="Task", fill=C["text"], font=FONT_BOLD)
         cv.create_line(LBL_W, 0, LBL_W, HDR_H, fill=C["border"])
 
-        # 月ラベル
+        # Month labels
         d = datetime.date(min_date.year, min_date.month, 1)
         while d <= max_date:
             x = LBL_W + (d - min_date).days * day_w
@@ -1210,7 +1430,7 @@ class GanttWindow(tk.Toplevel):
             else:
                 d = datetime.date(d.year, d.month + 1, 1)
 
-        # 週区切り＋日付
+        # Week separators + dates
         total_days = (max_date - min_date).days
         for i in range(0, total_days + 1, 7):
             x = LBL_W + i * day_w
@@ -1226,7 +1446,7 @@ class GanttWindow(tk.Toplevel):
         y = HDR_H
 
         for event_name, task_list in groups.items():
-            # イベントヘッダー行
+            # Event header row
             cv.create_rectangle(0, y, cw, y + ROW_H, fill=C["accent_lt"], outline="")
             cv.create_text(10, y + ROW_H // 2, text=f"> {event_name}",
                            fill=C["accent_dk"], font=FONT_BOLD, anchor="w")
@@ -1243,38 +1463,38 @@ class GanttWindow(tk.Toplevel):
                 has_dl  = dl is not None
                 end_d   = dl if dl else start_d + datetime.timedelta(days=28)
 
-                # 行背景（交互）
+                # Row background (alternating)
                 row_bg = C["card"] if ri % 2 == 0 else C["bg"]
                 cv.create_rectangle(0, y, cw, y + ROW_H, fill=row_bg, outline="")
 
-                # ラベル
+                # Label
                 cv.create_text(10, y + ROW_H // 2, text=label,
                                fill=C["text"], font=FONT_SMALL, anchor="w")
                 cv.create_line(LBL_W, y, LBL_W, y + ROW_H, fill=C["border"])
 
-                # バー座標
+                # Bar coordinates
                 x1 = LBL_W + max(0, (start_d - min_date).days) * day_w
                 x2 = LBL_W + max(0, (end_d   - min_date).days) * day_w
                 x2 = max(x2, x1 + 8)
                 by1 = y + (ROW_H - BAR_H) // 2
                 by2 = by1 + BAR_H
 
-                # バー背景
+                # Bar background
                 bar_bg = C["accent_lt"] if has_dl else C["border"]
                 cv.create_rectangle(x1, by1, x2, by2,
                                     fill=bar_bg, outline=C["accent"], width=1)
 
-                # 進捗塗り
+                # Progress fill
                 fill_w = int((x2 - x1) * pct / 100)
                 if fill_w > 2:
                     cv.create_rectangle(x1, by1, x1 + fill_w, by2,
                                         fill=self._bar_color(pct), outline="")
 
-                # 進捗%テキスト
+                # Progress % text
                 cv.create_text((x1 + x2) // 2, (by1 + by2) // 2,
                                text=f"{pct}%", fill=C["text"], font=FONT_SMALL)
 
-                # 締切マーカー
+                # Deadline marker
                 if has_dl:
                     cv.create_line(x2, by1 - 2, x2, by2 + 2,
                                    fill=C["accent_dk"], width=2)
@@ -1286,7 +1506,7 @@ class GanttWindow(tk.Toplevel):
 # ── MJPEG AVI builder ─────────────────────────────────────
 
 def _build_mjpeg_avi(frames: list[bytes], fps: int, width: int, height: int) -> bytes:
-    """JPEG フレームのリストから MJPEG AVI バイト列を生成する"""
+    """Generate MJPEG AVI bytes from a list of JPEG frames."""
     n = len(frames)
     if n == 0:
         return b""
@@ -1301,8 +1521,8 @@ def _build_mjpeg_avi(frames: list[bytes], fps: int, width: int, height: int) -> 
 
     frame_chunks = [_chunk(b"00dc", f) for f in frames]
 
-    # idx1 — フレームオフセット索引
-    offset = 4  # 'movi' FOURCC の直後から
+    # idx1 — frame offset index
+    offset = 4  # immediately after the 'movi' FOURCC
     idx_data = b""
     for fc in frame_chunks:
         idx_data += b"00dc" + struct.pack("<III", 0x10, offset, len(fc) - 8)
@@ -1353,7 +1573,7 @@ def _build_mjpeg_avi(frames: list[bytes], fps: int, width: int, height: int) -> 
 # ── Recording window ───────────────────────────────────────
 
 class RecordingWindow(tk.Toplevel):
-    MAX_FRAMES = 18000  # 10fps で最大30分相当
+    MAX_FRAMES = 18000  # up to 30 minutes at 10fps
 
     def __init__(self, parent):
         super().__init__(parent)
@@ -1385,7 +1605,7 @@ class RecordingWindow(tk.Toplevel):
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
     def _build(self):
-        # ── モニター選択 ──
+        # ── Monitor selection ──
         tk.Label(self, text="Monitor", bg=C["bg"], fg=C["text"],
                  font=FONT_BOLD).pack(anchor="w", padx=14, pady=(14, 4))
         radio_frame = tk.Frame(self, bg=C["bg"])
@@ -1415,7 +1635,7 @@ class RecordingWindow(tk.Toplevel):
 
         tk.Frame(self, bg=C["border"], height=1).pack(fill="x", pady=8)
 
-        # ── JPEG 画質 ──
+        # ── JPEG Quality ──
         tk.Label(self, text="Quality (JPEG)", bg=C["bg"], fg=C["text"],
                  font=FONT_BOLD).pack(anchor="w", padx=14)
         q_frame = tk.Frame(self, bg=C["bg"])
@@ -1433,7 +1653,7 @@ class RecordingWindow(tk.Toplevel):
 
         tk.Frame(self, bg=C["border"], height=1).pack(fill="x", pady=8)
 
-        # ── 保存先 ──
+        # ── Save destination ──
         tk.Label(self, text="Save to", bg=C["bg"], fg=C["text"],
                  font=FONT_BOLD).pack(anchor="w", padx=14)
         dir_frame = tk.Frame(self, bg=C["bg"])
@@ -1449,7 +1669,7 @@ class RecordingWindow(tk.Toplevel):
 
         tk.Frame(self, bg=C["border"], height=1).pack(fill="x", pady=8)
 
-        # ── オプション ──
+        # ── Options ──
         tk.Checkbutton(self, text="Hide launcher while recording",
                        variable=self._hide_var,
                        bg=C["bg"], fg=C["text"], font=FONT,
@@ -1459,7 +1679,7 @@ class RecordingWindow(tk.Toplevel):
 
         tk.Frame(self, bg=C["border"], height=1).pack(fill="x", pady=(8, 0))
 
-        # ── ボタン & ステータス ──
+        # ── Button & Status ──
         self._rec_btn = tk.Button(self, text="Start Recording",
                                   command=self._toggle_recording,
                                   bg=C["accent"], fg="white",
@@ -1495,7 +1715,7 @@ class RecordingWindow(tk.Toplevel):
         ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
         self._output_path = save_dir / f"recording_{ts}.avi"
 
-        # キャプチャ範囲を決定（偶数サイズに切り捨て）
+        # Determine capture region (truncate to even size)
         idx = self._monitor_var.get()
         if idx == -1:
             self._bbox = None
@@ -1533,7 +1753,7 @@ class RecordingWindow(tk.Toplevel):
                     img = ImageGrab.grab(all_screens=True)
                 else:
                     img = ImageGrab.grab(bbox=bbox, all_screens=True)
-                # 偶数サイズに切り詰め（MJPEG で推奨）
+                # Crop to even dimensions (recommended for MJPEG)
                 w = img.width  & ~1
                 h = img.height & ~1
                 if w != img.width or h != img.height:
@@ -1581,15 +1801,14 @@ class RecordingWindow(tk.Toplevel):
             self._parent.deiconify()
             self.deiconify()
 
-        # 保存処理をバックグラウンドスレッドで実行（UI フリーズ防止）
+        # Run the save process on a background thread (to prevent UI freeze)
         def _save():
             with self._lock:
                 frames = list(self._frames)
             if frames:
-                # キャプチャ範囲から幅・高さを取得（最初のフレームで判定）
+                # Get width/height from capture region (determined from first frame)
                 import struct as _s
-                # JPEG SOF0 から幅高さを読む代わりに、直接 ImageGrab でサイズを取得
-                # 最初のフレームを PIL で開いて幅高さを取得
+                # Instead of reading from JPEG SOF0, open the first frame with PIL to get dimensions
                 from PIL import Image
                 sample = Image.open(io.BytesIO(frames[0]))
                 w, h = sample.size
@@ -1616,7 +1835,7 @@ class RecordingWindow(tk.Toplevel):
                                    "Recording is in progress. Stop and close?",
                                    parent=self):
                 self._stop_recording()
-                # 保存完了後に自動で閉じるよう on_save_done をラップ
+                # Wrap on_save_done to auto-close after saving
                 orig = self._on_save_done
                 def _close_after(fc, orig=orig):
                     orig(fc)
@@ -1756,13 +1975,234 @@ class ScreenshotWindow(tk.Toplevel):
         subprocess.Popen(["explorer", str(save_dir)])
 
 
+# ── File Scanner ──────────────────────────────────────────
+
+class FileScanWindow(tk.Toplevel):
+    """Displays a list of files (name, size, timestamp) under a specified folder.
+    Recursively scans subdirectories."""
+
+    _COL_DEFS = [
+        ("path",    "Path",             320),
+        ("size",    "Size",              90),
+        ("mtime",   "Modified",         150),
+    ]
+
+    def __init__(self, parent: tk.Misc, folder_path: str = ""):
+        super().__init__(parent)
+        self._parent = parent
+        self.title("File Scanner")
+        self.configure(bg=C["bg"])
+        self.resizable(True, True)
+        self.minsize(600, 400)
+
+        self._folder_var = tk.StringVar(value=folder_path)
+        self._status_var = tk.StringVar(value="Select a folder and click Scan.")
+        self._sort_col   = "path"
+        self._sort_rev   = False
+        self._rows: list[tuple] = []   # (rel_path, size_bytes, mtime_dt)
+        self._scanning   = False
+        self._cancel     = False
+
+        self._build()
+        self.update_idletasks()
+        pw, ph = parent.winfo_width(), parent.winfo_height()
+        px, py = parent.winfo_rootx(), parent.winfo_rooty()
+        self.geometry(f"700x500+{px + (pw - 700) // 2}+{py + (ph - 500) // 2}")
+
+        if folder_path and os.path.isdir(folder_path):
+            self.after(100, self._start_scan)
+
+    def _build(self):
+        top = tk.Frame(self, bg=C["bg"])
+        top.pack(fill="x", padx=12, pady=(12, 6))
+
+        tk.Label(top, text="Folder", bg=C["bg"], fg=C["text"],
+                 font=FONT_BOLD).pack(side="left")
+
+        entry = tk.Entry(top, textvariable=self._folder_var,
+                         font=("Consolas", 9), bg=C["card"], fg=C["text"],
+                         relief="flat", bd=1, insertbackground=C["accent"])
+        entry.pack(side="left", fill="x", expand=True, padx=(6, 4))
+        entry.bind("<Return>", lambda _: self._start_scan())
+
+        tk.Button(top, text="…", command=self._browse,
+                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  font=FONT, cursor="hand2", padx=6, pady=1,
+                  activebackground=C["border"]).pack(side="left", padx=(0, 4))
+
+        self._scan_btn = tk.Button(top, text="Scan", command=self._start_scan,
+                                   bg=C["accent"], fg="white", relief="flat", bd=0,
+                                   font=FONT_BOLD, cursor="hand2", padx=10, pady=2,
+                                   activebackground=C["accent_dk"])
+        self._scan_btn.pack(side="left")
+
+        tree_frame = tk.Frame(self, bg=C["bg"])
+        tree_frame.pack(fill="both", expand=True, padx=12, pady=(0, 6))
+
+        cols = [c[0] for c in self._COL_DEFS]
+        style = ttk.Style(self)
+        style.configure("FileScan.Treeview",
+                        background=C["card"], foreground=C["text"],
+                        fieldbackground=C["card"], rowheight=22,
+                        font=FONT)
+        style.configure("FileScan.Treeview.Heading",
+                        background=C["accent_lt"], foreground=C["text"],
+                        relief="flat", font=FONT_BOLD)
+        style.map("FileScan.Treeview",
+                  background=[("selected", C["card_h"])],
+                  foreground=[("selected", C["text"])])
+
+        self._tree = ttk.Treeview(tree_frame, columns=cols, show="headings",
+                                  style="FileScan.Treeview", selectmode="extended")
+
+        for key, label, width in self._COL_DEFS:
+            self._tree.heading(key, text=label,
+                               command=lambda k=key: self._sort_by(k))
+            anchor = "w" if key == "path" else "e"
+            self._tree.column(key, width=width, anchor=anchor, stretch=(key == "path"))
+
+        vsb = ttk.Scrollbar(tree_frame, orient="vertical",   command=self._tree.yview)
+        hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self._tree.xview)
+        self._tree.configure(yscrollcommand=vsb.set, xscrollcommand=hsb.set)
+
+        hsb.pack(side="bottom", fill="x")
+        vsb.pack(side="right",  fill="y")
+        self._tree.pack(side="left", fill="both", expand=True)
+
+        bot = tk.Frame(self, bg=C["bg"])
+        bot.pack(fill="x", padx=12, pady=(0, 10))
+
+        self._status_lbl = tk.Label(bot, textvariable=self._status_var,
+                                    bg=C["bg"], fg=C["text_sub"], font=FONT,
+                                    anchor="w")
+        self._status_lbl.pack(side="left", fill="x", expand=True)
+
+        tk.Button(bot, text="Export CSV", command=self._export_csv,
+                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  font=FONT, cursor="hand2", padx=8, pady=2,
+                  activebackground=C["border"]).pack(side="right")
+
+    def _browse(self):
+        path = filedialog.askdirectory(title="Select folder", parent=self)
+        if path:
+            self._folder_var.set(os.path.normpath(path))
+
+    def _start_scan(self):
+        folder = self._folder_var.get().strip()
+        if not folder or not os.path.isdir(folder):
+            messagebox.showwarning("Error", "Please specify a valid folder.", parent=self)
+            return
+        if self._scanning:
+            self._cancel = True
+            return
+        for item in self._tree.get_children():
+            self._tree.delete(item)
+        self._rows.clear()
+        self._scanning = True
+        self._cancel   = False
+        self._scan_btn.configure(text="Cancel", bg=C["btn_del"],
+                                 activebackground=C["btn_del_h"])
+        self._status_var.set("Scanning...")
+        threading.Thread(target=self._scan_worker, args=(folder,), daemon=True).start()
+
+    def _scan_worker(self, folder: str):
+        rows: list[tuple] = []
+        try:
+            for root, _dirs, files in os.walk(folder):
+                if self._cancel:
+                    break
+                for fname in files:
+                    if self._cancel:
+                        break
+                    full = os.path.join(root, fname)
+                    try:
+                        stat = os.stat(full)
+                        rel  = os.path.relpath(full, folder)
+                        size = stat.st_size
+                        mtime = datetime.datetime.fromtimestamp(stat.st_mtime)
+                        rows.append((rel, size, mtime))
+                    except OSError:
+                        pass
+        finally:
+            self.after(0, self._scan_done, rows)
+
+    def _scan_done(self, rows: list[tuple]):
+        self._rows = rows
+        self._scanning = False
+        self._scan_btn.configure(text="Scan", bg=C["accent"],
+                                 activebackground=C["accent_dk"])
+        if self._cancel:
+            self._status_var.set(f"Cancelled. ({len(rows)} files retrieved)")
+            self._cancel = False
+        else:
+            self._status_var.set(f"{len(rows)} file(s) found.")
+        self._refresh_tree()
+
+    def _refresh_tree(self):
+        for item in self._tree.get_children():
+            self._tree.delete(item)
+
+        rows = sorted(
+            self._rows,
+            key=lambda r: (r[0].lower() if self._sort_col == "path"
+                           else r[1] if self._sort_col == "size"
+                           else r[2]),
+            reverse=self._sort_rev,
+        )
+        for rel, size, mtime in rows:
+            self._tree.insert("", "end", values=(
+                rel,
+                self._fmt_size(size),
+                mtime.strftime("%Y-%m-%d %H:%M:%S"),
+            ))
+
+    def _sort_by(self, col: str):
+        if self._sort_col == col:
+            self._sort_rev = not self._sort_rev
+        else:
+            self._sort_col = col
+            self._sort_rev = False
+        self._refresh_tree()
+
+    def _export_csv(self):
+        if not self._rows:
+            messagebox.showinfo("Info", "No data to export.", parent=self)
+            return
+        save_path = filedialog.asksaveasfilename(
+            parent=self,
+            defaultextension=".csv",
+            filetypes=[("CSV files", "*.csv"), ("All files", "*.*")],
+            initialfile="file_scan.csv",
+        )
+        if not save_path:
+            return
+        import csv
+        try:
+            with open(save_path, "w", newline="", encoding="utf-8-sig") as f:
+                w = csv.writer(f)
+                w.writerow(["Path", "Size (bytes)", "Modified"])
+                for rel, size, mtime in self._rows:
+                    w.writerow([rel, size, mtime.strftime("%Y-%m-%d %H:%M:%S")])
+            self._status_var.set(f"Saved: {save_path}")
+        except Exception as e:
+            messagebox.showerror("Error", str(e), parent=self)
+
+    @staticmethod
+    def _fmt_size(size: int) -> str:
+        for unit in ("B", "KB", "MB", "GB"):
+            if size < 1024:
+                return f"{size:.1f} {unit}"
+            size /= 1024
+        return f"{size:.1f} TB"
+
+
 # ── Notification popup ────────────────────────────────────
 
 
 
 def _get_monitor_work_area(widget: tk.Misc) -> tuple[int, int, int, int]:
-    """ウィジェットが表示されているモニタの作業領域 (left, top, right, bottom) を返す。
-    タスクバーを除いた領域。取得失敗時はプライマリモニタのサイズにフォールバック。"""
+    """Return the work area (left, top, right, bottom) of the monitor where the widget is displayed.
+    The area excludes the taskbar. Falls back to primary monitor size on failure."""
     try:
         class _RECT(ctypes.Structure):
             _fields_ = [("left", ctypes.c_long), ("top", ctypes.c_long),
@@ -1773,7 +2213,7 @@ def _get_monitor_work_area(widget: tk.Misc) -> tuple[int, int, int, int]:
                         ("rcMonitor", _RECT), ("rcWork", _RECT),
                         ("dwFlags", wintypes.DWORD)]
 
-        # ウィジェット中心座標でモニタを特定
+        # identify monitor by widget center coordinates
         cx = widget.winfo_rootx() + widget.winfo_width() // 2
         cy = widget.winfo_rooty() + widget.winfo_height() // 2
         MONITOR_DEFAULTTONEAREST = 2
@@ -1789,10 +2229,10 @@ def _get_monitor_work_area(widget: tk.Misc) -> tuple[int, int, int, int]:
         return 0, 0, widget.winfo_screenwidth(), widget.winfo_screenheight()
 
 class NotificationPopup(tk.Toplevel):
-    """右下フェードイン・プログレスバー付き通知ポップアップ"""
+    """Bottom-right fade-in notification popup with progress bar"""
 
-    FADE_MS    = 350    # フェードイン/アウト時間（ms）
-    FADE_STEPS = 14     # フェードのステップ数
+    FADE_MS    = 350    # fade in/out duration (ms)
+    FADE_STEPS = 14     # number of fade steps
 
     def __init__(self, parent, task: dict, display_ms: int = 8000):
         super().__init__(parent)
@@ -1800,9 +2240,9 @@ class NotificationPopup(tk.Toplevel):
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         self.attributes("-alpha", 0.0)
-        self.configure(bg=C["accent"])   # 外枠: アクセントカラー 2px
+        self.configure(bg=C["accent"])   # outer border: accent color 2px
 
-        # ── 残り時間を計算 ──
+        # ── calculate remaining time ──
         sched_str = task.get("scheduled_at", "")
         try:
             sched      = datetime.datetime.fromisoformat(sched_str)
@@ -1816,15 +2256,15 @@ class NotificationPopup(tk.Toplevel):
         recurrence = task.get("recurrence", "none")
         recur_text = {"daily": "Daily", "weekly": "Weekly", "monthly": "Monthly"}.get(recurrence, "")
 
-        # ── メインコンテナ（ボーダー 2px 分のパディング）──
+        # ── main container (2px border padding) ──
         inner = tk.Frame(self, bg=C["card"])
         inner.pack(fill="both", expand=True, padx=2, pady=2)
 
-        # ── ヘッダー帯 ──────────────────────────────────
+        # ── header strip ──────────────────────────────────
         hdr = tk.Frame(inner, bg=C["accent_lt"])
         hdr.pack(fill="x")
 
-        # 左：「通知」ラベル + 繰り返しバッジ
+        # left: "Notify" label + recurrence badge
         hdr_l = tk.Frame(hdr, bg=C["accent_lt"])
         hdr_l.pack(side="left", padx=(10, 4), pady=(7, 5))
         tk.Label(hdr_l, text="Notify",
@@ -1836,11 +2276,11 @@ class NotificationPopup(tk.Toplevel):
                      font=("Segoe UI", 7, "bold"),
                      padx=5, pady=1).pack(side="left", padx=(6, 0))
 
-        # 右：装飾丸 3つ + 閉じるボタン
+        # right: decorative circles + close button
         hdr_r = tk.Frame(hdr, bg=C["accent_lt"])
         hdr_r.pack(side="right", padx=(0, 8), pady=6)
 
-        # Claude ロゴ風の4頂点スター
+        # 4-point star resembling the Claude logo
         star_cv = tk.Canvas(hdr_r, bg=C["accent_lt"], width=14, height=14,
                             highlightthickness=0)
         star_cv.pack(side="left")
@@ -1857,21 +2297,21 @@ class NotificationPopup(tk.Toplevel):
         close.bind("<Enter>",    lambda e: close.configure(bg=C["accent"], fg="white"))
         close.bind("<Leave>",    lambda e: close.configure(bg=C["accent_lt"], fg=C["accent_dk"]))
 
-        # ヘッダー下アクセント細線
+        # thin accent line below header
         tk.Frame(inner, bg=C["accent"], height=1).pack(fill="x")
 
-        # ── コンテンツ領域 ────────────────────────────────
+        # ── content area ────────────────────────────────
         content = tk.Frame(inner, bg=C["card"])
         content.pack(fill="both", expand=True, padx=14, pady=(10, 12))
 
-        # タイトル
+        # title
         title = task.get("title", "")
         tk.Label(content, text=title,
                  bg=C["card"], fg=C["text"],
                  font=FONT_BOLD, anchor="w",
                  wraplength=240, justify="left").pack(fill="x", pady=(0, 6))
 
-        # 日時ピル
+        # datetime pill
         if time_str:
             pill = tk.Frame(content, bg=C["accent_lt"])
             pill.pack(anchor="w", pady=(0, 3))
@@ -1879,13 +2319,13 @@ class NotificationPopup(tk.Toplevel):
                      bg=C["accent_lt"], fg=C["accent_dk"],
                      font=FONT_SMALL, padx=8, pady=2).pack()
 
-        # 残り時間
+        # remaining time
         if remain_str:
             tk.Label(content, text=remain_str,
                      bg=C["card"], fg=C["accent"],
                      font=("Segoe UI", 9, "bold"), anchor="w").pack(fill="x")
 
-        # 起動パス
+        # launch path
         open_paths = task.get("open_paths", [])
         if not open_paths and task.get("open_path"):
             open_paths = [task["open_path"]]
@@ -1897,7 +2337,7 @@ class NotificationPopup(tk.Toplevel):
                      font=FONT_SMALL, anchor="w",
                      wraplength=240, justify="left").pack(fill="x", pady=(4, 0))
 
-        # メモ
+        # notes
         notes = task.get("notes", "")
         if notes:
             tk.Frame(content, bg=C["border"], height=1).pack(fill="x", pady=(6, 0))
@@ -1906,23 +2346,23 @@ class NotificationPopup(tk.Toplevel):
                      font=FONT_SMALL, anchor="w",
                      wraplength=240, justify="left").pack(fill="x", pady=(4, 0))
 
-        # ── プログレスバー（底部、6px）──────────────────────
+        # ── progress bar (bottom, 6px) ──────────────────────
         self._pb = tk.Canvas(self, height=6, bg=C["accent_lt"],
                              highlightthickness=0)
         self._pb.pack(fill="x", side="bottom")
 
-        # ── 配置（アプリが表示されているモニタの右下）────────────
+        # ── position at bottom-right of the monitor where the app is shown ──
         self.update_idletasks()
         w  = max(self.winfo_reqwidth(), 280)
         h  = max(self.winfo_reqheight(), 80)
         ml, mt, mr, mb = _get_monitor_work_area(parent)
         self.geometry(f"{w}x{h}+{mr - w - 20}+{mb - h - 12}")
 
-        # クリックで閉じる
+        # click to close
         for widget in (self, inner, content, hdr, hdr_l, hdr_r):
             widget.bind("<Button-1>", lambda e: self.destroy())
 
-        # アニメーション開始
+        # start animation
         self._start  = time.monotonic()
         self._pb_rect = None
         self._fade_in()
@@ -1965,7 +2405,7 @@ class NotificationPopup(tk.Toplevel):
 # ── Notify item dialog ─────────────────────────────────────
 
 class NotifyDialog(tk.Toplevel):
-    """通知アイテムの追加/編集ダイアログ"""
+    """Dialog for adding/editing a notification item"""
 
     def __init__(self, parent, initial: dict | None = None):
         super().__init__(parent)
@@ -1979,14 +2419,14 @@ class NotifyDialog(tk.Toplevel):
         self._title_var     = tk.StringVar(value=d.get("title", ""))
         self._notify_var    = tk.IntVar(value=d.get("notify_before", 5))
         self._recur_var     = tk.StringVar(value=d.get("recurrence", "none"))
-        # open_paths: 新形式リスト。旧形式 open_path 文字列も移行
+        # open_paths: new list format; legacy open_path string is also migrated
         _op = d.get("open_paths", [])
         if not _op and d.get("open_path"):
             _op = [d["open_path"]]
         self._open_paths_list: list = list(_op)
         self._notes_init    = d.get("notes", "")
 
-        # 既存の scheduled_at を分解してスピンボックス初期値に設定
+        # parse existing scheduled_at to set spinbox initial values
         now = datetime.datetime.now()
         sched_str = d.get("scheduled_at", "")
         try:
@@ -2022,7 +2462,7 @@ class NotifyDialog(tk.Toplevel):
 
         self._row("Title", 0, self._title_var)
 
-        # scheduled input (スピンボックス分割)
+        # scheduled input (split spinboxes)
         tk.Label(self._form, text="Scheduled", bg=C["bg"], fg=C["text_sub"],
                  font=FONT_SMALL, anchor="e", width=9).grid(
                      row=1, column=0, padx=(12, 4), pady=3, sticky="e")
@@ -2076,7 +2516,7 @@ class NotifyDialog(tk.Toplevel):
         )
         recur_cb.grid(row=3, column=1, padx=(0, 12), pady=3, sticky="w")
 
-        # open paths (複数)
+        # open paths (multiple)
         tk.Label(self._form, text="Open", bg=C["bg"], fg=C["text_sub"],
                  font=FONT_SMALL, anchor="ne", width=9).grid(
                      row=4, column=0, padx=(12, 4), pady=3, sticky="ne")
@@ -2615,28 +3055,27 @@ class FolderLauncher(tk.Tk):
     # _active >= 0  : folder category index
     # _active == -1 : Terminal tab
 
-    # システムタブ定義 (key, 表示名, _active値)
+    # system tab definitions (key, display name, _active value)
     _SYSTEM_TABS = [
-        ("dashboard", "Home",      -8),
         ("auto",      "Auto",      -9),
         ("terminal",  "Terminal",  -1),
         ("tasks",     "Tasks",     -2),
         ("pomodoro",  "Pomodoro", -10),
-        ("calendar",  "Calendar", -11),
         ("notify",    "Notify",    -3),
         ("web",       "Web",       -4),
         ("clip",      "Clip",      -5),
         ("ping",      "Ping",      -6),
         ("memo",      "Memo",      -7),
+        ("grep",      "Search",   -12),
     ]
-    _DEFAULT_PINS = ["dashboard", "terminal", "tasks", "notify"]
+    _DEFAULT_PINS = ["terminal", "tasks", "notify"]
 
-    # Ping モニター定数
-    _PING_HISTORY = 30   # 棒グラフで保持する件数
-    _PING_BAR_W   = 16   # バー幅 (px)
-    _PING_BAR_GAP = 2    # バー間隔 (px)
-    _PING_ROW_H   = 80   # ホスト行の高さ (px)
-    _PING_MAX_MS  = 500  # グラフ縦軸上限 (ms)
+    # Ping monitor constants
+    _PING_HISTORY = 30   # number of entries retained in bar chart
+    _PING_BAR_W   = 16   # bar width (px)
+    _PING_BAR_GAP = 2    # bar gap (px)
+    _PING_ROW_H   = 80   # host row height (px)
+    _PING_MAX_MS  = 500  # graph vertical axis upper limit (ms)
 
     def __init__(self):
         super().__init__()
@@ -2646,11 +3085,11 @@ class FolderLauncher(tk.Tk):
         self.configure(bg=C["bg"])
         self.minsize(320, 260)
 
-        # Windows のネイティブ ttk テーマは Treeview 見出し等の背景色を無視するため
-        # clam テーマに切り替えてカスタムカラーを有効にする
+        # The native Windows ttk theme ignores background colors for Treeview headers etc.,
+        # so switch to the clam theme to enable custom colors.
         ttk.Style(self).theme_use("clam")
 
-        # 全設定を config.json から一括読み込み（テーマ決定が先）
+        # Load all settings at once from config.json (theme is resolved first)
         self._data: list[dict] = []
         self._conns: list[dict] = []
         self._tasks: list[dict] = []
@@ -2661,6 +3100,7 @@ class FolderLauncher(tk.Tk):
         self._bm_selected: int = 0
         self._active: int = 0   # -1=Terminal, -2=Tasks, -3=Notify, -4=Web, -5=Clip, -6=Ping, -7=Memo
         self._pinned_tabs: list[str] = list(self._DEFAULT_PINS)
+        self._tab_offset: int = 0   # category tab scroll position
         self._memos: list[dict] = []   # {"title": str, "body": str}
         self._memo_sel: int | None = None
         self._work_active: dict | None = None  # {"task_idx": int, "start": datetime}
@@ -2670,21 +3110,20 @@ class FolderLauncher(tk.Tk):
         self._work_anim_id = None
         self._work_anim_dots = 0
         self._work_bar_lbl: tk.Label | None = None
-        self._theme: str = "violet"   # _load_config() で上書きされる
-        self._tick_id = None             # _tick() の after ID（再構築時のキャンセル用）
+        self._theme: str = "plush"   # overwritten by _load_config()
+        self._tick_id = None             # after ID for _tick() (cancelled on rebuild)
         self._clip_history: list[dict] = []   # {"text": str, "ts": str}
-        self._clip_prev: str = ""             # 前回クリップボード値（変化検知用）
+        self._clip_prev: str = ""             # previous clipboard value (for change detection)
         self._ping_hosts: list[str] = []
         self._ping_data:  dict[str, list] = {}   # host -> [ms|None, ...]
         self._ping_interval: int = 5
         self._ping_enabled: bool = True
         self._ping_running: bool = False
         self._ping_lock = threading.Lock()
-        self._ping_next_id  = None   # 次の ping ラウンドの after ID
-        self._ping_graph_id = None   # グラフ更新ループの after ID
+        self._ping_next_id  = None   # after ID for next ping round
+        self._ping_graph_id = None   # after ID for graph update loop
         self._ping_canvases:   dict[str, tk.Canvas] = {}
         self._ping_stat_vars:  dict[str, tk.StringVar] = {}
-        self._dashboard_refresh_id = None
         # Auto tab: rule management
         self._rules: list[dict] = []
         self._rule_fired: set[str] = set()
@@ -2692,31 +3131,26 @@ class FolderLauncher(tk.Tk):
         self._file_watcher_started: bool = False
         self._conn_ping_cache:   dict[str, str | None] = {}  # host -> "ok"|"fail"|None
         self._conn_ping_dots:    dict[str, list]        = {}  # host -> [Canvas, ...]
-        self._conn_ping_running: set[str]               = set()   # ダッシュボード自動リフレッシュの after ID
-        self._conn_ping_enabled: bool = True   # Terminal ping ドット ON/OFF
+        self._conn_ping_running: set[str]               = set()   # after IDs for dashboard auto-refresh
+        self._conn_ping_enabled: bool = True   # Terminal ping dot ON/OFF
         # Pomodoro
         self._pomo_state: str = "idle"   # idle/work/break/long_break/paused
-        self._pomo_paused_state: str = "work"  # 一時停止前の状態
-        self._pomo_remaining: int = 25 * 60   # 残り秒数
-        self._pomo_cycle: int = 0             # 完了したポモドーロ数
-        self._pomo_session: int = 0           # 合計セッション数
+        self._pomo_paused_state: str = "work"  # state before pause
+        self._pomo_remaining: int = 25 * 60   # remaining seconds
+        self._pomo_cycle: int = 0             # completed pomodoro count
+        self._pomo_session: int = 0           # total session count
         self._pomo_after_id = None            # after() ID
         self._pomo_work_min: int = 25
         self._pomo_break_min: int = 5
         self._pomo_long_break_min: int = 15
-        self._pomo_task_idx: int | None = None  # リンクしているタスクのindex
+        self._pomo_task_idx: int | None = None  # index of linked task
         self._pomo_lbl_time: tk.Label | None = None
         self._pomo_lbl_state: tk.Label | None = None
         self._pomo_lbl_cycle: tk.Label | None = None
         self._pomo_canvas: tk.Canvas | None = None
-        # Calendar
-        _today = datetime.date.today()
-        self._cal_year:    int = _today.year
-        self._cal_month:   int = _today.month
-        self._cal_sel_day: int | None = None
         self._load_config()
 
-        # テーマ確定後にアイコンを生成
+        # generate icon after theme is resolved
         palette = ICON_PALETTES.get(self._theme)
         self._icon = tk.PhotoImage(data=_make_icon_png(palette))
         _setup_taskbar_icon(self, palette)
@@ -2729,8 +3163,14 @@ class FolderLauncher(tk.Tk):
             lambda *_: self._render_list() if self._active == -1 else None,
         )
 
-        self._notified: set[str] = set()  # 通知済みキー管理
-        self._notify_past_open: bool = False  # 過去通知セクションの開閉状態
+        self._notified: set[str] = set()  # tracks already-notified keys
+        self._notify_past_open: bool = False  # open/close state of past notifications section
+        self._prev_bp: str = "md"  # レスポンシブ: 前回のブレークポイント
+        self._grep_folder: str = ""
+        self._grep_query:  str = ""
+        self._grep_ext:    str = ""
+        self._grep_running: bool = False
+        self._grep_cancel:  bool = False
 
         self._build_ui()
         self._render_tabs()
@@ -2741,12 +3181,12 @@ class FolderLauncher(tk.Tk):
         self.after(600, self._show_startup_summary)
         self._check_recurring_tasks()
 
-    # ── 設定読み書き（config.json に統合）─────────────────
+    # ── Config read/write (unified in config.json) ─────────────────
 
     def _load_config(self):
         migrated = False
         if not CONFIG_FILE.exists():
-            # 旧形式の個別ファイルがあれば自動マイグレーション
+            # auto-migrate from legacy individual files if they exist
             old_folders   = Path(__file__).parent / "folders.json"
             old_terminals = Path(__file__).parent / "terminals.json"
             old_tasks     = Path(__file__).parent / "tasks.json"
@@ -2773,15 +3213,19 @@ class FolderLauncher(tk.Tk):
                 self._topmost_cfg = False
                 self._alpha_cfg = 1.0
                 self._card_size = "normal"
+                self._font_size = 11
+                self._grep_folder = ""
+                self._grep_query  = ""
+                self._grep_ext    = ""
                 return
-            migrated = True  # マイグレーション成功
+            migrated = True  # migration successful
         else:
             try:
                 cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
             except Exception:
                 cfg = {}
 
-        # フォルダ設定（旧形式の自動変換）
+        # folder settings (auto-convert from legacy format)
         raw = cfg.get("folders", [])
         if raw and isinstance(raw[0], (str, dict)) and "category" not in raw[0]:
             folders = []
@@ -2797,21 +3241,21 @@ class FolderLauncher(tk.Tk):
         if not self._data:
             self._data = [{"category": "General", "folders": []}]
 
-        # ターミナル接続設定
+        # terminal connection settings
         self._conns = cfg.get("terminals", [])
         self._terminal_groups = cfg.get("terminal_groups", [])
         self._bookmarks = cfg.get("bookmarks", [])
 
-        # タスクデータ
+        # task data
         self._tasks = cfg.get("tasks", [])
 
-        # 通知アイテム
+        # notification items
         self._notify_items = cfg.get("notifications", [])
 
-        # クリップボード履歴
+        # clipboard history
         self._clip_history = cfg.get("clipboard_history", [])
 
-        # Ping モニター
+        # Ping monitor
         self._ping_hosts    = cfg.get("ping_hosts", [])
         self._ping_interval = cfg.get("ping_interval", 5)
         self._ping_enabled  = cfg.get("ping_enabled", True)
@@ -2820,24 +3264,29 @@ class FolderLauncher(tk.Tk):
         # Memo pad
         self._memos = cfg.get("memos", [])
 
-        # タブピン留め設定
+        # tab pin settings
         self._pinned_tabs = cfg.get("pinned_tabs", list(self._DEFAULT_PINS))
 
-        # 自動化ルール
+        # automation rules
         self._rules = cfg.get("rules", [])
 
-        # バナー表示設定
+        # banner display settings
         self._banner_enabled_cfg: bool = cfg.get("banner_enabled", True)
         self._notify_display_sec_cfg: int = cfg.get("notify_display_sec", 8)
         self._topmost_cfg: bool = cfg.get("topmost", False)
         self._alpha_cfg: float = float(cfg.get("alpha", 1.0))
         self._card_size: str = cfg.get("card_size", "normal")
+        self._font_size: int = int(cfg.get("font_size", 11))
+        _update_fonts(self._font_size)
+        self._grep_folder = cfg.get("grep_folder", "")
+        self._grep_query  = cfg.get("grep_query",  "")
+        self._grep_ext    = cfg.get("grep_ext",    "")
 
-        # テーマ設定
-        self._theme = cfg.get("theme", "violet")
-        C.update(THEMES.get(self._theme, THEMES["violet"]))
+        # theme settings
+        self._theme = cfg.get("theme", "plush")
+        C.update(THEMES.get(self._theme, THEMES["plush"]))
 
-        # 旧ファイルからのマイグレーション時は config.json に保存
+        # save to config.json when migrating from legacy files
         if migrated:
             self._save_config()
 
@@ -2860,6 +3309,10 @@ class FolderLauncher(tk.Tk):
             "topmost":         self.attributes("-topmost"),
             "alpha":           self.attributes("-alpha"),
             "card_size":       self._card_size,
+            "font_size":       self._font_size,
+            "grep_folder":     self._grep_folder,
+            "grep_query":      self._grep_query,
+            "grep_ext":        self._grep_ext,
             "memos":         self._memos,
             "pinned_tabs":   self._pinned_tabs,
             "rules":         self._rules,
@@ -2885,17 +3338,53 @@ class FolderLauncher(tk.Tk):
     def _current(self) -> dict:
         return self._data[self._active]
 
+    # ── レスポンシブ制御 ──────────────────────────────────
+
+    def _width_bp(self) -> str:
+        """現在のウィンドウ幅に応じたブレークポイント名を返す (xs/sm/md)。"""
+        try:
+            w = self.winfo_width()
+        except Exception:
+            return "md"
+        if w < 360:
+            return "xs"
+        if w < 480:
+            return "sm"
+        return "md"
+
+    def _on_window_resize(self, event):
+        """ウィンドウリサイズ時のレスポンシブ制御。"""
+        if event.widget is not self:
+            return
+
+        # ヘッダーバナーを幅 < 400 では非表示にする
+        if hasattr(self, "_banner_lbl"):
+            try:
+                w = self.winfo_width()
+                if w < 400:
+                    self._banner_lbl.pack_forget()
+                elif not self._banner_lbl.winfo_ismapped():
+                    self._banner_lbl.pack(side="left", padx=(4, 0))
+            except Exception:
+                pass
+
+        # ブレークポイントが変わった時のみタブ・コンテンツを再描画
+        bp = self._width_bp()
+        if bp == self._prev_bp:
+            return
+        self._prev_bp = bp
+        self._render_tabs()
+        self._render_list()
+
     # ── UI construction ───────────────────────────────────
 
     def _build_ui(self):
         # header
-        hdr = tk.Frame(self, bg=C["accent"], height=30)
+        hdr = tk.Frame(self, bg=C["accent"], height=40)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
-
-        tk.Label(hdr, text="Gem",
-                 bg=C["accent"], fg="white", font=FONT_BOLD,
-                 ).pack(side="left", padx=8, pady=4)
+        # ヘッダー下ボーダー（1px）
+        tk.Frame(self, bg=C["accent_dk"], height=1).pack(fill="x")
 
         self._clock_var = tk.StringVar()
         tk.Label(hdr, textvariable=self._clock_var,
@@ -2924,7 +3413,7 @@ class FolderLauncher(tk.Tk):
         _btn_cfg = dict(bg=C["accent_dk"], fg="white", relief="flat", bd=0,
                         font=FONT_SMALL, cursor="hand2",
                         activebackground=C["accent_lt"], activeforeground=C["text"],
-                        padx=8, pady=1)
+                        padx=10, pady=3)
 
         # ⚙ Settings menu (rightmost)
         def _show_settings():
@@ -2938,7 +3427,7 @@ class FolderLauncher(tk.Tk):
                                 bg=C["card"], fg=C["text"],
                                 activebackground=C["card_h"], activeforeground=C["text"],
                                 relief="flat", font=FONT_SMALL)
-            for key, label in [("violet","Violet"),("dark","Dark"),("light","Light"),
+            for key, label in [("plush","Plush"),("violet","Violet"),("dark","Dark"),("light","Light"),
                                 ("gemini","Gemini"),("claude","Claude"),("scarlet","Scarlet"),
                                 ("ocean","Ocean"),("rose","Rose"),("mint","Mint")]:
                 prefix = "* " if self._theme == key else "  "
@@ -2993,6 +3482,18 @@ class FolderLauncher(tk.Tk):
                     command=lambda k=key: self._set_card_size(k))
             m.add_cascade(label="Card size", menu=size_sub)
 
+            # Font size submenu
+            font_sub = tk.Menu(m, tearoff=0,
+                               bg=C["card"], fg=C["text"],
+                               activebackground=C["card_h"], activeforeground=C["text"],
+                               relief="flat", font=FONT_SMALL)
+            for pt in [9, 10, 11, 12, 13, 14]:
+                prefix = "* " if self._font_size == pt else "  "
+                font_sub.add_command(
+                    label=f"{prefix}{pt}pt",
+                    command=lambda p=pt: self._set_font_size(p))
+            m.add_cascade(label="Font size", menu=font_sub)
+
             # Transparency
             m.add_command(label="Transparency...", command=self._open_transparency_dialog)
 
@@ -3027,9 +3528,15 @@ class FolderLauncher(tk.Tk):
         self.bind("<Unmap>", self._on_unmap)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
+        # レスポンシブ: ウィンドウサイズ変更を監視
+        self.bind("<Configure>", self._on_window_resize)
+
         # tab bar
-        self._tab_bar = tk.Frame(self, bg=C["tab_inact"])
+        self._tab_bar = tk.Frame(self, bg=C["bg"], pady=2)
         self._tab_bar.pack(fill="x")
+
+        # タブバーとコンテンツの間のセパレーターライン
+        tk.Frame(self, bg=C["border"], height=1).pack(fill="x")
 
         # scrollable list
         wrapper = tk.Frame(self, bg=C["bg"])
@@ -3066,7 +3573,7 @@ class FolderLauncher(tk.Tk):
         self._footer_btn.pack(side="left", fill="x", expand=True)
         _hover(self._footer_btn, C["accent_dk"], C["accent"])
 
-        # フォルダタブ専用の「+ Add File」ボタン
+        # "Add File" button for folder tabs only
         self._footer_btn2 = tk.Button(
             self._footer, text="+ Add File",
             command=self._add_file,
@@ -3077,7 +3584,7 @@ class FolderLauncher(tk.Tk):
         self._footer_btn2.pack(side="left", fill="x", expand=True, padx=(2, 0))
         _hover(self._footer_btn2, C["border"], C["accent_lt"])
 
-        # Tasksタブ専用の「Export」ボタン
+        # "Export" button for Tasks tab only
         self._footer_btn3 = tk.Button(
             self._footer, text="Export",
             command=self._export_tasks,
@@ -3089,56 +3596,132 @@ class FolderLauncher(tk.Tk):
 
     # ── Tab bar ───────────────────────────────────────────
 
+    # maximum number of category tabs shown in the tab bar at once
+    _MAX_CAT_TABS = 7
+
     def _render_tabs(self):
         for w in self._tab_bar.winfo_children():
             w.destroy()
 
-        # category tabs (left side)
-        for i, cat in enumerate(self._data):
-            is_active = (i == self._active)
-            btn = tk.Button(
-                self._tab_bar,
-                text=cat["category"],
-                command=lambda i=i: self._switch_tab(i),
-                bg=C["tab_act"] if is_active else C["tab_inact"],
-                fg=C["text"] if is_active else C["text_sub"],
+        # レスポンシブ: ウィンドウ幅に応じてタブ表示数を決定
+        try:
+            win_w = self.winfo_width()
+        except Exception:
+            win_w = 480
+        max_cat_tabs = (3 if win_w < 360 else
+                        5 if win_w < 480 else
+                        self._MAX_CAT_TABS)
+
+        # ── category tabs (left side) ──────────────────────────────
+        total = len(self._data)
+
+        # clamp offset to safe range
+        max_offset = max(0, total - max_cat_tabs)
+        self._tab_offset = max(0, min(self._tab_offset, max_offset))
+
+        # auto-scroll so the active category tab is within the visible range
+        if 0 <= self._active < total:
+            if self._active < self._tab_offset:
+                self._tab_offset = self._active
+            elif self._active >= self._tab_offset + max_cat_tabs:
+                self._tab_offset = self._active - max_cat_tabs + 1
+
+        # ◀ scroll button (shown only when offset is greater than 0)
+        if self._tab_offset > 0:
+            tk.Button(
+                self._tab_bar, text="◀",
+                command=self._scroll_tabs_left,
+                bg=C["bg"], fg=C["text_sub"],
                 relief="flat", bd=0,
-                font=FONT_BOLD if is_active else FONT,
-                cursor="hand2", padx=10, pady=3,
-                activebackground=C["tab_act"],
+                font=FONT, cursor="hand2", padx=4, pady=3,
+                activebackground=C["card_h"],
                 activeforeground=C["text"],
+            ).pack(side="left")
+
+        # ピル型タブ生成ヘルパー
+        def _pill(parent, text, active, cmd, ctx_cmd=None, side="left"):
+            font_val = FONT_BOLD if active else FONT
+            bg_act   = C["accent"]
+            bg_idle  = C["bg"]
+            bg_hov   = C["card_h"]
+            fg_act   = "white"
+            fg_idle  = C["text_sub"]
+            # サイズ測定
+            tmp = tk.Label(parent, text=text, font=font_val, padx=10, pady=4)
+            tmp.update_idletasks()
+            tw, th = tmp.winfo_reqwidth(), tmp.winfo_reqheight()
+            tmp.destroy()
+            r = min(th // 2, 10)
+            fill = [bg_act if active else bg_idle]
+            cv = tk.Canvas(parent, width=tw, height=th,
+                           bg=C["bg"], highlightthickness=0, cursor="hand2")
+            cv.pack(side=side, padx=1, pady=2)
+            def _draw(f):
+                fill[0] = f
+                cv.delete("all")
+                _draw_rounded_rect(cv, 0, 0, tw, th, r, fill=f, outline="")
+                fg = fg_act if f == bg_act else (C["text"] if f == bg_hov else fg_idle)
+                cv.create_text(tw//2, th//2, text=text, font=font_val, fill=fg)
+            _draw(fill[0])
+            cv.bind("<Button-1>", lambda e: cmd())
+            if ctx_cmd:
+                cv.bind("<Button-3>", ctx_cmd)
+            if not active:
+                cv.bind("<Enter>", lambda e: _draw(bg_hov))
+                cv.bind("<Leave>", lambda e: _draw(bg_idle))
+            return cv
+
+        # show category tabs within the visible range
+        end = min(self._tab_offset + max_cat_tabs, total)
+        for i in range(self._tab_offset, end):
+            cat = self._data[i]
+            is_active = (i == self._active)
+            _pill(
+                self._tab_bar, cat["category"], is_active,
+                cmd=lambda i=i: self._switch_tab(i),
+                ctx_cmd=lambda e, i=i: self._tab_context_menu(e, i),
+                side="left",
             )
-            btn.pack(side="left")
-            # right-click for category actions
-            btn.bind("<Button-3>", lambda e, i=i: self._tab_context_menu(e, i))
+
+        # ▶ scroll button (shown only when there are still tabs to the right)
+        if end < total:
+            tk.Button(
+                self._tab_bar, text="▶",
+                command=self._scroll_tabs_right,
+                bg=C["bg"], fg=C["text_sub"],
+                relief="flat", bd=0,
+                font=FONT, cursor="hand2", padx=4, pady=3,
+                activebackground=C["card_h"],
+                activeforeground=C["text"],
+            ).pack(side="left")
 
         # '+' category add button
         tk.Button(
-            self._tab_bar, text=" + ",
+            self._tab_bar, text="+",
             command=self._add_category,
-            bg=C["tab_inact"], fg=C["text_sub"],
+            bg=C["bg"], fg=C["text_sub"],
             relief="flat", bd=0,
-            font=FONT, cursor="hand2", padx=4, pady=3,
-            activebackground=C["accent_lt"],
+            font=FONT, cursor="hand2", padx=6, pady=3,
+            activebackground=C["card_h"],
             activeforeground=C["text"],
         ).pack(side="left", padx=(2, 0))
 
         # separator (spacer)
-        tk.Frame(self._tab_bar, bg=C["tab_inact"]).pack(side="left", fill="x", expand=True)
+        tk.Frame(self._tab_bar, bg=C["bg"]).pack(side="left", fill="x", expand=True)
 
-        # ≡ メニューボタン（最右端）
+        # ≡ menu button (rightmost)
         self._menu_btn = tk.Button(
-            self._tab_bar, text="  =  ",
+            self._tab_bar, text="≡",
             command=self._show_tabs_menu,
-            bg=C["tab_inact"], fg=C["text_sub"],
+            bg=C["bg"], fg=C["text_sub"],
             relief="flat", bd=0,
-            font=FONT, cursor="hand2", padx=6, pady=5,
-            activebackground=C["tab_act"],
+            font=FONT, cursor="hand2", padx=8, pady=3,
+            activebackground=C["card_h"],
             activeforeground=C["text"],
         )
         self._menu_btn.pack(side="right")
 
-        # ピン留め済みのシステムタブのみ表示（右側から逆順で pack）
+        # show only pinned system tabs (packed in reverse order from the right)
         for key, label, idx in reversed(self._SYSTEM_TABS):
             if key not in self._pinned_tabs:
                 continue
@@ -3146,41 +3729,31 @@ class FolderLauncher(tk.Tk):
                 count = len(self._clip_history)
                 label = f"Clip ({count})" if count else "Clip"
             is_active = (self._active == idx)
-            btn = tk.Button(
-                self._tab_bar,
-                text=label,
-                command=lambda idx=idx: self._switch_tab(idx),
-                bg=C["tab_act"] if is_active else C["tab_inact"],
-                fg=C["text"] if is_active else C["text_sub"],
-                relief="flat", bd=0,
-                font=FONT_BOLD if is_active else FONT,
-                cursor="hand2", padx=10, pady=5,
-                activebackground=C["tab_act"],
-                activeforeground=C["text"],
+            _pill(
+                self._tab_bar, label, is_active,
+                cmd=lambda idx=idx: self._switch_tab(idx),
+                ctx_cmd=lambda e, k=key: self._unpin_tab(k),
+                side="right",
             )
-            btn.pack(side="right")
-            btn.bind("<Button-3>", lambda e, k=key: self._unpin_tab(k))
 
     def _switch_tab(self, idx: int):
-        # Pingタブを離れるときはモニターを停止する
+        # stop monitor when leaving Ping tab
         if self._active == -6 and idx != -6:
             self._ping_stop()
-        # ダッシュボードを離れるときは自動リフレッシュをキャンセルする
-        if self._active == -8 and idx != -8:
-            if self._dashboard_refresh_id is not None:
-                self.after_cancel(self._dashboard_refresh_id)
-                self._dashboard_refresh_id = None
+        # Grep タブから離れるときに検索をキャンセル
+        if self._active == -12 and idx != -12:
+            self._grep_cancel = True
         self._active = idx
         self._render_tabs()
         self._update_footer()
         self._render_list()
-        # Pingタブに入ったときはモニターを開始する（有効時のみ）
+        # start monitor when entering Ping tab (if enabled)
         if idx == -6 and self._ping_enabled:
             self._ping_start()
         # Start file watcher when entering the Auto tab
         if idx == -9:
             self._ensure_file_watcher()
-        # ポモドーロタブを離れたら表示ラベルをリセット（タイマーは動き続ける）
+        # reset display labels when leaving Pomodoro tab (timer keeps running)
         if idx != -10:
             self._pomo_lbl_time = None
             self._pomo_lbl_state = None
@@ -3214,14 +3787,14 @@ class FolderLauncher(tk.Tk):
         elif self._active == -7:
             self._footer_btn.configure(text="+ Add Memo", command=self._add_memo)
             self._footer_btn2.pack_forget()
-        elif self._active == -8:
-            self._footer_btn.configure(text="Refresh", command=self._render_dashboard)
-            self._footer_btn2.pack_forget()
         elif self._active == -9:
             self._footer_btn.configure(text="+ Add Rule", command=self._add_rule)
             self._footer_btn2.pack_forget()
         elif self._active == -10:
             self._footer_btn.configure(text="Settings", command=self._pomo_open_settings)
+            self._footer_btn2.pack_forget()
+        elif self._active == -12:
+            self._footer_btn.configure(text="Search", command=lambda: None)
             self._footer_btn2.pack_forget()
         elif self._active == -11:
             self._footer_btn.configure(text="Today", command=self._cal_go_today)
@@ -3232,14 +3805,30 @@ class FolderLauncher(tk.Tk):
             self._footer_btn2.pack(side="left", fill="x", expand=True, padx=(2, 0))
 
     def _show_tabs_menu(self):
-        """≡ボタンのドロップダウンメニューを表示する。"""
+        """Show the drop-down menu for the ≡ button."""
         menu = tk.Menu(self, tearoff=0,
                        bg=C["card"], fg=C["text"],
                        activebackground=C["card_h"],
                        activeforeground=C["text"],
                        relief="flat", font=FONT)
 
-        # 全システムタブを一覧（ピン留め済みは先頭に「+」マーク）
+        # if there are many category tabs, show them in a submenu
+        if len(self._data) > self._MAX_CAT_TABS:
+            cat_menu = tk.Menu(menu, tearoff=0,
+                               bg=C["card"], fg=C["text"],
+                               activebackground=C["card_h"],
+                               activeforeground=C["text"],
+                               relief="flat", font=FONT)
+            for i, cat in enumerate(self._data):
+                is_active = (i == self._active)
+                cat_menu.add_command(
+                    label=("▸ " if is_active else "  ") + cat["category"],
+                    command=lambda i=i: self._switch_tab(i),
+                )
+            menu.add_cascade(label="Categories...", menu=cat_menu)
+            menu.add_separator()
+
+        # list all system tabs (pinned ones get a leading "+" mark)
         for key, label, idx in self._SYSTEM_TABS:
             pinned = key in self._pinned_tabs
             prefix = "+ " if pinned else "  "
@@ -3250,7 +3839,7 @@ class FolderLauncher(tk.Tk):
 
         menu.add_separator()
 
-        # ピン留め管理サブメニュー
+        # pin management submenu
         pin_menu = tk.Menu(menu, tearoff=0,
                            bg=C["card"], fg=C["text"],
                            activebackground=C["card_h"],
@@ -3268,7 +3857,7 @@ class FolderLauncher(tk.Tk):
         menu.tk_popup(btn.winfo_rootx(), btn.winfo_rooty() + btn.winfo_height())
 
     def _toggle_pin(self, key: str):
-        """タブのピン留めをトグルする。"""
+        """Toggle the pin state of a tab."""
         if key in self._pinned_tabs:
             self._pinned_tabs.remove(key)
         else:
@@ -3276,8 +3865,18 @@ class FolderLauncher(tk.Tk):
         self._save_config()
         self._render_tabs()
 
+    def _scroll_tabs_left(self):
+        """Scroll the category tabs to the left."""
+        self._tab_offset = max(0, self._tab_offset - 1)
+        self._render_tabs()
+
+    def _scroll_tabs_right(self):
+        """Scroll the category tabs to the right."""
+        self._tab_offset = min(len(self._data) - 1, self._tab_offset + 1)
+        self._render_tabs()
+
     def _unpin_tab(self, key: str):
-        """右クリックでタブバーからタブを外す。"""
+        """Unpin a tab from the tab bar via right-click."""
         if key in self._pinned_tabs:
             self._pinned_tabs.remove(key)
             self._save_config()
@@ -3369,14 +3968,12 @@ class FolderLauncher(tk.Tk):
             self._render_ping_list()
         elif self._active == -7:
             self._render_memo_list()
-        elif self._active == -8:
-            self._render_dashboard()
         elif self._active == -9:
             self._render_rules_list()
         elif self._active == -10:
             self._render_pomodoro()
-        elif self._active == -11:
-            self._render_calendar()
+        elif self._active == -12:
+            self._render_grep_list()
         else:
             self._render_folder_list()
 
@@ -3403,10 +4000,13 @@ class FolderLauncher(tk.Tk):
         pad_x = {"compact": 6, "normal": 8, "large": 12}.get(size, 8)
         name_font = FONT_SMALL if size == "compact" else FONT_BOLD
 
-        card = tk.Frame(self._list_frame, bg=C["card"],
+        outer = tk.Frame(self._list_frame, bg=C["bg"],
+                         highlightthickness=0)
+        outer.pack(fill="x", pady=(1 if size == "compact" else 3), padx=6)
+        card = tk.Frame(outer, bg=C["card"],
                         pady=pad_y, padx=pad_x, relief="flat", bd=0,
                         highlightthickness=1, highlightbackground=C["border"])
-        card.pack(fill="x", pady=(1 if size == "compact" else 2), padx=2)
+        card.pack(fill="both", expand=True)
 
         left = tk.Frame(card, bg=C["card"])
         left.pack(side="left", fill="both", expand=True)
@@ -3422,7 +4022,7 @@ class FolderLauncher(tk.Tk):
                      font=FONT_SMALL, anchor="w").pack(fill="x")
 
         del_btn = tk.Button(
-            card, text="x",
+            card, text="✕",
             command=lambda i=idx: self._remove_folder(i),
             bg=C["card"], fg=C["btn_del"],
             relief="flat", bd=0,
@@ -3447,13 +4047,21 @@ class FolderLauncher(tk.Tk):
         def _show_ctx(e):
             self._card_context_menu(e, idx, name, path)
 
+        def _on_enter(e, f=card):
+            _set_bg(f, C["card_h"])
+            f.configure(highlightbackground=C["accent"])
+
+        def _on_leave(e, f=card):
+            _set_bg(f, C["card"])
+            f.configure(highlightbackground=C["border"])
+
         def _bind_open(w):
             if w in extra_btns:
                 return
             w.bind("<Button-1>", lambda e, p=path, t=item_type: self._open_item(p, t))
             w.bind("<Button-3>", _show_ctx)
-            w.bind("<Enter>",    lambda e, f=card: _set_bg(f, C["card_h"]))
-            w.bind("<Leave>",    lambda e, f=card: _set_bg(f, C["card"]))
+            w.bind("<Enter>",    _on_enter)
+            w.bind("<Leave>",    _on_leave)
             w.configure(cursor="hand2")
             for child in w.winfo_children():
                 _bind_open(child)
@@ -3467,7 +4075,7 @@ class FolderLauncher(tk.Tk):
                        activebackground=C["card_h"], activeforeground=C["text"],
                        relief="flat", font=FONT)
 
-        # 並び替え
+        # reorder
         menu.add_command(
             label="Move Up",
             command=lambda: self._move_folder_order(idx, -1),
@@ -3499,6 +4107,13 @@ class FolderLauncher(tk.Tk):
                          command=lambda: self._edit_folder(idx, name, path))
         menu.add_command(label="Remove",
                          command=lambda: self._remove_folder(idx))
+
+        # フォルダのみ: ファイル一覧スキャン
+        if os.path.isdir(path):
+            menu.add_separator()
+            menu.add_command(label="Scan Files",
+                             command=lambda: FileScanWindow(self, path))
+
         menu.tk_popup(event.x_root, event.y_root)
 
     # ── Folder operations ─────────────────────────────────
@@ -3574,22 +4189,24 @@ class FolderLauncher(tk.Tk):
     # ── Terminal list ─────────────────────────────────────
 
     def _render_terminal_list(self):
-        # ── 2ペイン構造（左: グループサイドバー, 右: 接続リスト）──
+        # ── 2-pane layout (left: group sidebar, right: connection list) ──
         pane = tk.Frame(self._list_frame, bg=C["bg"])
         pane.pack(fill="both", expand=True)
 
-        # 左サイドバー（幅固定 110px）
-        sidebar = tk.Frame(pane, bg=C["card"], width=110,
+        # left sidebar (レスポンシブ幅: xs=70 / sm=90 / md=110)
+        _tw = self._width_bp()
+        _sidebar_w = 70 if _tw == "xs" else 90 if _tw == "sm" else 110
+        sidebar = tk.Frame(pane, bg=C["card"], width=_sidebar_w,
                            highlightthickness=1, highlightbackground=C["border"])
         sidebar.pack(side="left", fill="y", padx=(0, 4))
         sidebar.pack_propagate(False)
         self._render_group_sidebar(sidebar)
 
-        # 右メインエリア
+        # right main area
         main_frame = tk.Frame(pane, bg=C["bg"])
         main_frame.pack(side="left", fill="both", expand=True)
 
-        # ── ツールバー（検索・ソート）──────────────────────
+        # ── toolbar (search / sort) ──────────────────────
         toolbar = tk.Frame(main_frame, bg=C["bg"])
         toolbar.pack(fill="x", pady=(0, 4))
 
@@ -3613,7 +4230,7 @@ class FolderLauncher(tk.Tk):
                 return label + (" v" if self._conn_sort["reverse"] else " ^")
             return label
 
-        # Terminal ping ドット ON/OFF トグル
+        # Terminal ping dot ON/OFF toggle
         def _toggle_conn_ping():
             self._conn_ping_enabled = not self._conn_ping_enabled
             self._save_config()
@@ -3641,7 +4258,7 @@ class FolderLauncher(tk.Tk):
             b.pack(side="left", padx=1)
             _hover(b, C["card_h"], C["tab_inact"])
 
-        # ── フィルタリング & ソート ──────────────────────
+        # ── filtering & sorting ──────────────────────
         query = self._conn_search.get().lower()
         sg = self._selected_group  # None = All
         conns_idx = [
@@ -3677,14 +4294,14 @@ class FolderLauncher(tk.Tk):
         for i, conn in conns_idx:
             self._make_conn_card(i, conn, main_frame)
 
-        # 表示中の各ホストへ ping プローブを開始（有効時のみ）
+        # start ping probe for each displayed host (if enabled)
         if self._conn_ping_enabled:
             for _, conn in conns_idx:
                 host = conn.get("host", "")
                 if host and host not in self._conn_ping_running:
                     self._conn_ping_probe(host)
 
-        # ── ドラッグ&ドロップ（ソート・検索・グループ絞り込みなし時のみ有効）──
+        # ── drag & drop (enabled only when no sort/search/group filter is active) ──
         if col is not None or query or sg is not None:
             return
         cards = [w for w in main_frame.winfo_children()
@@ -3721,7 +4338,7 @@ class FolderLauncher(tk.Tk):
             dnd["moved"] = True
 
         def on_release(ev):
-            # サイドバーのグループボタンへのドロップをチェック
+            # check if dropped onto a group button in the sidebar
             target = ev.widget.winfo_containing(ev.x_root, ev.y_root)
             if (hasattr(self, "_sidebar_group_btns")
                     and target in self._sidebar_group_btns
@@ -3752,7 +4369,7 @@ class FolderLauncher(tk.Tk):
                 w.bind("<ButtonRelease-1>", on_release)
 
     def _render_group_sidebar(self, parent: tk.Frame):
-        """左サイドバーにグループボタンを描画する。"""
+        """Render group buttons in the left sidebar."""
         self._sidebar_group_btns: dict = {}
 
         def _select_group(grp: str | None):
@@ -3783,7 +4400,7 @@ class FolderLauncher(tk.Tk):
         for grp in self._terminal_groups:
             b = _make_grp_btn(grp, grp)
             grp_btns.append(b)
-            # 右クリックメニュー（Rename / Delete）
+            # right-click menu (Rename / Delete)
             menu = tk.Menu(parent, tearoff=0)
             menu.add_command(label="Rename",
                              command=lambda g=grp: self._rename_terminal_group(g))
@@ -3791,11 +4408,11 @@ class FolderLauncher(tk.Tk):
                              command=lambda g=grp: self._delete_terminal_group(g))
             b.bind("<Button-3>", lambda e, m=menu: m.tk_popup(e.x_root, e.y_root))
 
-        # ── グループボタンのドラッグ並び替え ──────────────────
+        # ── drag reordering of group buttons ──────────────────
         dnd: dict = {"src": None, "moved": False}
 
         def _grp_btns_now() -> list[tk.Button]:
-            """parent の pack 順でグループボタンを返す。"""
+            """Return group buttons in pack order within parent."""
             grp_set = set(grp_btns)
             return [w for w in parent.pack_slaves() if w in grp_set]
 
@@ -3832,7 +4449,7 @@ class FolderLauncher(tk.Tk):
                 _select_group(grp)
                 return
             dnd["moved"] = False
-            # ドロップ先を確定してデータを並び替え
+            # finalize drop target and reorder data
             cur = _grp_btns_now()
             try:
                 si = cur.index(btn)
@@ -3860,7 +4477,7 @@ class FolderLauncher(tk.Tk):
             b.bind("<B1-Motion>",       lambda e, btn=b:         on_motion(e, btn))
             b.bind("<ButtonRelease-1>", lambda e, btn=b, g=grp:  on_release(e, btn, g))
 
-        # + グループ追加ボタン
+        # + group add button
         add_btn = tk.Button(parent, text="+ Add Group",
                             command=self._add_terminal_group,
                             bg=C["bg"], fg=C["text_sub"],
@@ -3879,7 +4496,7 @@ class FolderLauncher(tk.Tk):
         card = tk.Frame(parent_frame, bg=C["card"],
                         pady=4, padx=8, relief="flat", bd=0,
                         highlightthickness=1, highlightbackground=C["border"])
-        card._conn_orig_idx = idx   # ドラッグ&ドロップ用に元インデックスを保持
+        card._conn_orig_idx = idx   # retain original index for drag & drop
         card.pack(fill="x", pady=2, padx=2)
 
         left = tk.Frame(card, bg=C["card"])
@@ -3887,7 +4504,7 @@ class FolderLauncher(tk.Tk):
 
         proto_color = {"SSH": C["accent"], "RDP": C["accent_dk"],
                        "SMB": C["text_sub"]}.get(conn["protocol"], C["text_sub"])
-        # グループバッジ（グループ未所属の場合は非表示）
+        # group badge (hidden if not in any group)
         grp = conn.get("group", "")
         name_text = f"  {conn['name']}"
         if grp:
@@ -3901,14 +4518,14 @@ class FolderLauncher(tk.Tk):
             ncmds = len(conn.get("commands", []))
             cmd_str = f"  {ncmds} cmd{'s' if ncmds != 1 else ''}" if ncmds else ""
             sub_text = f"{conn['protocol']}  {conn['user']}@{conn['host']}:{conn.get('port', 22)}{cmd_str}"
-        # 接続統計
+        # connection statistics
         cnt = conn.get("connect_count", 0)
         last = conn.get("last_connected")
         stats_parts = []
         if cnt:
             stats_parts.append(f"{cnt}x")
         if last:
-            stats_parts.append(last[:10])  # ISO形式から日付部分のみ
+            stats_parts.append(last[:10])  # date part only from ISO format
         if stats_parts:
             sub_text += "  |  " + "  ".join(stats_parts)
         tk.Label(left, text=sub_text,
@@ -3931,7 +4548,7 @@ class FolderLauncher(tk.Tk):
                              activebackground=C["card"], activeforeground=C["text"])
         edit_btn.pack(side="right", padx=(0, 2))
 
-        # 接続可否ドット（バックグラウンド ping 結果を反映、無効時は非表示）
+        # reachability dot (reflects background ping result; hidden when disabled)
         host = conn.get("host", "")
         if self._conn_ping_enabled:
             status = self._conn_ping_cache.get(host)
@@ -3948,7 +4565,7 @@ class FolderLauncher(tk.Tk):
             widget.configure(cursor="hand2")
 
     def _conn_ping_probe(self, host: str):
-        """バックグラウンドで ping を実行し、ドットの色を更新する。"""
+        """Run ping in the background and update the dot color."""
         self._conn_ping_running.add(host)
 
         def _probe():
@@ -3967,7 +4584,7 @@ class FolderLauncher(tk.Tk):
         threading.Thread(target=_probe, daemon=True).start()
 
     def _conn_ping_update_dots(self, host: str):
-        """ping 結果に合わせてドット Canvas の色を更新する。"""
+        """Update the dot canvas color based on the ping result."""
         self._conn_ping_running.discard(host)
         status = self._conn_ping_cache.get(host)
         color = "#4caf50" if status == "ok" else C["btn_del"]
@@ -3976,7 +4593,7 @@ class FolderLauncher(tk.Tk):
                 cv.delete("all")
                 cv.create_oval(1, 1, 11, 11, fill=color, outline="")
             except tk.TclError:
-                pass  # ウィジェットが既に破棄済み
+                pass  # widget already destroyed
 
     # ── Terminal connection operations ────────────────────
 
@@ -4003,7 +4620,7 @@ class FolderLauncher(tk.Tk):
                                groups=self._terminal_groups)
         if dlg.result is None:
             return
-        # 統計データを引き継ぐ
+        # carry over statistics data
         prev = self._conns[idx]
         result = dlg.result
         result["connect_count"] = prev.get("connect_count", 0)
@@ -4026,7 +4643,7 @@ class FolderLauncher(tk.Tk):
                 _launch_smb(conn)
             else:
                 _launch_teraterm(conn)
-            # 接続統計を更新（self._conns の実体を更新）
+            # update connection statistics (update the actual self._conns entry)
             for c in self._conns:
                 if c is conn or (c.get("name") == conn.get("name") and
                                  c.get("host") == conn.get("host")):
@@ -4096,24 +4713,24 @@ class FolderLauncher(tk.Tk):
     # ── Clipboard history ─────────────────────────────────
 
     def _check_clipboard(self):
-        """500ms ごとにクリップボードを監視して変化があれば履歴に追加する。"""
+        """Monitor the clipboard every 500ms and add to history when it changes."""
         try:
             text = self.clipboard_get()
             if text and text != self._clip_prev:
                 self._clip_prev = text
-                # 重複があれば先頭に移動
+                # if duplicate exists, move it to the front
                 self._clip_history = [e for e in self._clip_history if e["text"] != text]
                 self._clip_history.insert(0, {
                     "text": text,
                     "ts": datetime.datetime.now().strftime("%m/%d %H:%M"),
                 })
-                # 最大件数超過分を削除
+                # delete entries exceeding the maximum count
                 del self._clip_history[CLIP_MAX:]
                 self._save_config()
                 if self._active == -5:
                     self._render_list()
                 else:
-                    self._render_tabs()   # 件数バッジだけ更新
+                    self._render_tabs()   # update count badge only
         except Exception:
             pass
         self.after(500, self._check_clipboard)
@@ -4121,7 +4738,7 @@ class FolderLauncher(tk.Tk):
     def _clear_clip_history(self):
         if not self._clip_history:
             return
-        if messagebox.askyesno("Clear All", "クリップボード履歴をすべて削除しますか？", parent=self):
+        if messagebox.askyesno("Clear All", "Delete all clipboard history?", parent=self):
             self._clip_history.clear()
             self._clip_prev = ""
             self._save_config()
@@ -4132,7 +4749,7 @@ class FolderLauncher(tk.Tk):
         if not self._clip_history:
             tk.Label(
                 self._list_frame,
-                text="クリップボード履歴はありません。\nテキストをコピーすると自動で記録されます。",
+                text="No clipboard history.\nCopy text and it will be recorded automatically.",
                 bg=C["bg"], fg=C["text_sub"],
                 font=FONT_SMALL, justify="center",
             ).pack(pady=20)
@@ -4149,7 +4766,7 @@ class FolderLauncher(tk.Tk):
             )
             card.pack(fill="x", pady=2, padx=2)
 
-            # 本文プレビュー（最大2行・80文字）
+            # content preview (max 2 lines / 80 chars)
             preview = text.replace("\r\n", "\n").replace("\r", "\n")
             lines   = preview.splitlines()
             line1   = lines[0][:80] if lines else ""
@@ -4166,7 +4783,7 @@ class FolderLauncher(tk.Tk):
                      bg=C["card"], fg=C["text_sub"],
                      font=FONT_SMALL, anchor="w").pack(fill="x")
 
-            # 削除ボタン
+            # delete button
             del_btn = tk.Button(
                 card, text="x",
                 command=lambda i=idx: self._remove_clip(i),
@@ -4177,7 +4794,7 @@ class FolderLauncher(tk.Tk):
             )
             del_btn.pack(side="right", padx=(6, 0))
 
-            # コピーボタン
+            # copy button
             copy_btn = tk.Button(
                 card, text="Copy",
                 command=lambda t=text: self._copy_clip(t),
@@ -4201,7 +4818,7 @@ class FolderLauncher(tk.Tk):
             _bind_card(card)
 
     def _copy_clip(self, text: str):
-        """テキストをクリップボードにコピーする（履歴の重複追加を防ぐため _clip_prev も更新）。"""
+        """Copy text to clipboard (also updates _clip_prev to prevent duplicate history entries)."""
         self.clipboard_clear()
         self.clipboard_append(text)
         self._clip_prev = text
@@ -4211,222 +4828,6 @@ class FolderLauncher(tk.Tk):
         self._save_config()
         self._render_tabs()
         self._render_list()
-
-    # ── Dashboard ─────────────────────────────────────────
-
-    def _render_dashboard(self):
-        """ダッシュボード（Home タブ）を描画する。"""
-        # 既存の自動リフレッシュ予約をキャンセル
-        if self._dashboard_refresh_id is not None:
-            self.after_cancel(self._dashboard_refresh_id)
-            self._dashboard_refresh_id = None
-
-        # _list_frame の中身をリセット
-        for w in self._list_frame.winfo_children():
-            w.destroy()
-
-        now = datetime.datetime.now()
-        today_str = now.strftime("%Y-%m-%d")
-
-        # スクロール可能なキャンバスエリアを構築
-        canvas = tk.Canvas(self._list_frame, bg=C["bg"], highlightthickness=0)
-        scrollbar = tk.Scrollbar(self._list_frame, orient="vertical", command=canvas.yview,
-                                 bg=C["bg"], troughcolor=C["bg"], activebackground=C["accent"])
-        inner = tk.Frame(canvas, bg=C["bg"])
-
-        inner.bind(
-            "<Configure>",
-            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
-        )
-        canvas.create_window((0, 0), window=inner, anchor="nw")
-        canvas.configure(yscrollcommand=scrollbar.set)
-
-        scrollbar.pack(side="right", fill="y")
-        canvas.pack(side="left", fill="both", expand=True)
-
-        def _on_mousewheel(e):
-            canvas.yview_scroll(int(-1 * (e.delta / 120)), "units")
-        canvas.bind("<MouseWheel>", _on_mousewheel)
-        inner.bind("<MouseWheel>", _on_mousewheel)
-
-        # ── セクション1: 今日の作業 ──────────────────────────
-        self._dash_section_header(inner, "Today's Tasks")
-
-        today_tasks = [
-            t for t in self._tasks
-            if not t.get("done", False) and (
-                t.get("deadline", "")[:10] == today_str
-                or any(wl[:10] == today_str for wl in t.get("work_log", []))
-            )
-        ]
-        if today_tasks:
-            for task in today_tasks:
-                row = self._dash_task_row(inner, task, today_str, now)
-                row.bind("<MouseWheel>", _on_mousewheel)
-        else:
-            tk.Label(inner, text="No tasks due today.",
-                     bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL
-                     ).pack(anchor="w", padx=8, pady=4)
-
-        # ── セクション2: 直近の通知 ──────────────────────────
-        self._dash_section_header(inner, "Upcoming Notifications")
-
-        deadline_24h = now + datetime.timedelta(hours=24)
-        upcoming = sorted(
-            [
-                item for item in self._notify_items
-                if not item.get("done", False)
-                and item.get("scheduled_at", "")
-                and now <= datetime.datetime.strptime(item["scheduled_at"], "%Y-%m-%d %H:%M") <= deadline_24h
-            ],
-            key=lambda x: x["scheduled_at"]
-        )[:5]
-
-        if upcoming:
-            for item in upcoming:
-                row = self._dash_notify_row(inner, item, now)
-                row.bind("<MouseWheel>", _on_mousewheel)
-        else:
-            tk.Label(inner, text="No notifications in the next 24 hours.",
-                     bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL
-                     ).pack(anchor="w", padx=8, pady=4)
-
-        # ── セクション3: Ping ステータス ─────────────────────
-        self._dash_section_header(inner, "Ping Status")
-
-        if self._ping_hosts:
-            for host in self._ping_hosts:
-                row = self._dash_ping_row(inner, host)
-                row.bind("<MouseWheel>", _on_mousewheel)
-        else:
-            tk.Label(inner, text="No ping hosts registered.",
-                     bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL
-                     ).pack(anchor="w", padx=8, pady=4)
-
-        # 30秒後に自動リフレッシュ
-        self._dashboard_refresh_id = self.after(30_000, self._dashboard_auto_refresh)
-
-    def _dashboard_auto_refresh(self):
-        """30秒ごとにダッシュボードを自動更新する。"""
-        self._dashboard_refresh_id = None
-        if self._active != -8:
-            return
-        self._render_dashboard()
-
-    def _dash_section_header(self, parent: tk.Frame, title: str) -> tk.Frame:
-        """ダッシュボードのセクションヘッダーバーを作成する。"""
-        bar = tk.Frame(parent, bg=C["accent_lt"])
-        bar.pack(fill="x", pady=(8, 2), padx=2)
-        tk.Label(bar, text=title, bg=C["accent_lt"], fg=C["accent_dk"],
-                 font=FONT_BOLD, anchor="w", padx=6, pady=2).pack(fill="x")
-        return bar
-
-    def _dash_task_row(self, parent: tk.Frame, task: dict,
-                       today_str: str, now: datetime.datetime) -> tk.Frame:
-        """ダッシュボード用タスク行カードを作成して返す。"""
-        card = tk.Frame(parent, bg=C["card"], padx=8, pady=4,
-                        highlightthickness=1, highlightbackground=C["border"])
-        card.pack(fill="x", pady=2, padx=4)
-
-        # 上段: イベント / プロセス
-        event   = task.get("event", "")
-        process = task.get("process", "")
-        label   = f"{event} / {process}" if event and process else (event or process or "(untitled)")
-        tk.Label(card, text=label, bg=C["card"], fg=C["text"],
-                 font=FONT_BOLD, anchor="w").pack(fill="x")
-
-        # 下段: 進捗バー + 残日数
-        pct = task.get("progress", 0)
-        filled  = int(pct / 10)
-        bar_str = "#" * filled + "-" * (10 - filled)
-
-        dl_str = task.get("deadline", "")
-        if dl_str:
-            try:
-                dl = datetime.datetime.fromisoformat(dl_str[:10])
-                days_left = (dl.date() - now.date()).days
-                if days_left == 0:
-                    dl_label = "due today"
-                elif days_left < 0:
-                    dl_label = f"{abs(days_left)}d overdue"
-                else:
-                    dl_label = f"{days_left}d left"
-            except ValueError:
-                dl_label = ""
-        else:
-            dl_label = ""
-
-        sub_text = f"{bar_str} {pct}%  {dl_label}".strip()
-        tk.Label(card, text=sub_text, bg=C["card"], fg=C["text_sub"],
-                 font=FONT_SMALL, anchor="w").pack(fill="x")
-        return card
-
-    def _dash_notify_row(self, parent: tk.Frame, item: dict, now: datetime.datetime) -> tk.Frame:
-        """ダッシュボード用通知行カードを作成して返す。"""
-        card = tk.Frame(parent, bg=C["card"], padx=8, pady=4,
-                        highlightthickness=1, highlightbackground=C["border"])
-        card.pack(fill="x", pady=2, padx=4)
-
-        # 上段: タイトル
-        tk.Label(card, text=item.get("title", "(untitled)"), bg=C["card"], fg=C["text"],
-                 font=FONT_BOLD, anchor="w").pack(fill="x")
-
-        # 下段: 日時 + 残り時間
-        sched_str = item.get("scheduled_at", "")
-        try:
-            sched_dt  = datetime.datetime.strptime(sched_str, "%Y-%m-%d %H:%M")
-            delta_sec = int((sched_dt - now).total_seconds())
-            if delta_sec >= 3600:
-                remain = f"in ~{delta_sec // 3600}h"
-            else:
-                remain = f"in ~{delta_sec // 60}m"
-            sub_text = f"{sched_str}  ({remain})"
-        except ValueError:
-            sub_text = sched_str
-
-        tk.Label(card, text=sub_text, bg=C["card"], fg=C["text_sub"],
-                 font=FONT_SMALL, anchor="w").pack(fill="x")
-        return card
-
-    def _dash_ping_row(self, parent: tk.Frame, host: str) -> tk.Frame:
-        """ダッシュボード用 Ping ステータス行カードを作成して返す。"""
-        card = tk.Frame(parent, bg=C["card"], padx=8, pady=4,
-                        highlightthickness=1, highlightbackground=C["border"])
-        card.pack(fill="x", pady=2, padx=4)
-
-        inner = tk.Frame(card, bg=C["card"])
-        inner.pack(fill="x")
-
-        # 左端: ステータスドット
-        dot_canvas = tk.Canvas(inner, width=14, height=14, bg=C["card"],
-                               highlightthickness=0)
-        dot_canvas.pack(side="left", padx=(0, 6))
-
-        history = self._ping_data.get(host, [])
-        if not history:
-            dot_color = C["text_sub"]  # データなし = グレー
-            ms_text   = "---"
-        else:
-            last_ms = history[-1]
-            if last_ms is None:
-                dot_color = C["btn_del"]   # Timeout = 赤
-                ms_text   = "Timeout"
-            else:
-                dot_color = "#4caf50"      # 応答あり = 緑
-                ms_text   = f"{last_ms} ms"
-
-        dot_canvas.create_oval(2, 2, 12, 12, fill=dot_color, outline=dot_color)
-
-        # 中央: ホスト名（24文字超は省略）
-        display_host = host if len(host) <= 24 else host[:21] + "..."
-        tk.Label(inner, text=display_host, bg=C["card"], fg=C["text"],
-                 font=FONT, anchor="w").pack(side="left", fill="x", expand=True)
-
-        # 右端: ms 値
-        tk.Label(inner, text=ms_text, bg=C["card"], fg=C["text_sub"],
-                 font=FONT_SMALL, anchor="e").pack(side="right")
-
-        return card
 
     # ── Auto (Rules) ──────────────────────────────────────
 
@@ -4705,8 +5106,8 @@ class FolderLauncher(tk.Tk):
     # ── Ping monitor ──────────────────────────────────────
 
     def _render_ping_list(self):
-        """Ping モニター UI を描画する。"""
-        # ── 設定バー ──────────────────────────────────────
+        """Render the Ping monitor UI."""
+        # ── settings bar ──────────────────────────────────────
         cfg_bar = tk.Frame(self._list_frame, bg=C["bg"])
         cfg_bar.pack(fill="x", pady=(0, 4))
 
@@ -4735,7 +5136,7 @@ class FolderLauncher(tk.Tk):
                   activebackground=C["card_h"],
                   activeforeground=C["text"]).pack(side="left")
 
-        # ON/OFF トグルボタン
+        # ON/OFF toggle button
         toggle_text = "Stop" if self._ping_running else "Start"
         toggle_fg   = C["btn_del"] if self._ping_running else C["accent"]
         tk.Button(cfg_bar, text=toggle_text,
@@ -4749,7 +5150,7 @@ class FolderLauncher(tk.Tk):
                  bg=C["bg"], fg=C["text_sub"],
                  font=FONT_SMALL).pack(side="right", padx=8)
 
-        # ── スクロール可能エリア ───────────────────────
+        # ── scrollable area ───────────────────────
         outer = tk.Frame(self._list_frame, bg=C["bg"])
         outer.pack(fill="both", expand=True)
 
@@ -4778,12 +5179,12 @@ class FolderLauncher(tk.Tk):
 
         if not self._ping_hosts:
             tk.Label(inner,
-                     text="接続先ホストを追加してください\n（「+ Add Host」ボタン）",
+                     text="Add hosts to monitor\n(use the \"+ Add Host\" button)",
                      bg=C["bg"], fg=C["text_sub"],
                      font=FONT_SMALL, justify="center").pack(pady=30)
             return
 
-        # ── 各ホスト行 ─────────────────────────────────
+        # ── each host row ─────────────────────────────────
         self._ping_row_canvases = {}
         self._ping_status_dots  = {}
         self._ping_stat_labels  = {}
@@ -4794,7 +5195,7 @@ class FolderLauncher(tk.Tk):
                            highlightthickness=1, highlightbackground=C["border"])
             row.pack(fill="x", padx=4, pady=2)
 
-            # 左：ステータスドット + ホスト名 + 統計テキスト
+            # left: status dot + host name + stats text
             lbl_frame = tk.Frame(row, bg=C["card"], width=160)
             lbl_frame.pack(side="left", fill="y")
             lbl_frame.pack_propagate(False)
@@ -4819,14 +5220,14 @@ class FolderLauncher(tk.Tk):
             stat_lbl.pack(fill="x", padx=6)
             self._ping_stat_labels[host] = stat_lbl
 
-            # 中：棒グラフ Canvas
+            # center: bar chart canvas
             cv = tk.Canvas(row, bg=C["card"],
                            width=bar_area_w, height=self._PING_ROW_H,
                            highlightthickness=0)
             cv.pack(side="left", padx=(0, 4))
             self._ping_row_canvases[host] = cv
 
-            # 右：削除ボタン
+            # right: delete button
             def _del(h=host):
                 if h in self._ping_hosts:
                     self._ping_hosts.remove(h)
@@ -4843,11 +5244,11 @@ class FolderLauncher(tk.Tk):
                                 activeforeground=C["btn_del_h"])
             del_btn.pack(side="right", padx=(0, 6))
 
-        # 初回描画
+        # initial draw
         self._ping_redraw()
 
     def _ping_redraw(self):
-        """全ホストの棒グラフを再描画する。メインスレッドから呼ぶこと。"""
+        """Redraw bar charts for all hosts. Must be called from the main thread."""
         if not hasattr(self, "_ping_row_canvases"):
             return
 
@@ -4860,7 +5261,7 @@ class FolderLauncher(tk.Tk):
             cv.delete("all")
             history = self._ping_data.get(host, [])
 
-            # グリッド線
+            # grid lines
             for gms in [100, 200, 300]:
                 gy = row_h - int(gms / max_ms * (row_h - 8)) - 4
                 if gy < 2:
@@ -4870,11 +5271,11 @@ class FolderLauncher(tk.Tk):
                 cv.create_text(2, gy - 1, text=f"{gms}", anchor="sw",
                                fill=C["text_sub"], font=("Segoe UI", 6))
 
-            # バー描画
+            # draw bars
             for j, ms in enumerate(history):
                 x = j * (bw + bg_gap)
                 if ms is None:
-                    # タイムアウト
+                    # timeout
                     cv.create_rectangle(x, 4, x + bw, row_h - 4,
                                         fill="#CC3344", outline="")
                     cv.create_text(x + bw // 2, row_h // 2,
@@ -4893,7 +5294,7 @@ class FolderLauncher(tk.Tk):
                                        text=str(int(ms)), fill="white",
                                        font=("Segoe UI", 6))
 
-            # 統計テキスト更新
+            # update stats text
             if host in self._ping_stat_vars and history:
                 last = history[-1]
                 vals = [v for v in history if v is not None]
@@ -4907,7 +5308,7 @@ class FolderLauncher(tk.Tk):
                     stat = f"{int(last)}ms"
                 self._ping_stat_vars[host].set(stat)
 
-                # ステータスドット・ラベル色を更新（緑=OK / 赤=Timeout）
+                # update status dot and label color (green=OK / red=Timeout)
                 ok = (last is not None)
                 dot_color  = "#44CC77" if ok else "#CC3344"
                 stat_color = "#44CC77" if ok else "#CC4455"
@@ -4917,12 +5318,12 @@ class FolderLauncher(tk.Tk):
                     self._ping_stat_labels[host].configure(fg=stat_color)
 
     def _ping_add_host(self):
-        """Ping ホスト追加ダイアログを開く。ターミナル接続先を候補として提示する。"""
+        """Open the dialog to add a ping host, presenting terminal connections as suggestions."""
         suggestions = [c["host"] for c in self._conns
                        if c["host"] not in self._ping_hosts]
-        hint = "ホスト名または IP アドレス"
+        hint = "Hostname or IP address"
         if suggestions:
-            hint += f"\n例: {', '.join(suggestions[:4])}"
+            hint += f"\nEx: {', '.join(suggestions[:4])}"
         dlg = InputDialog(self, "Add Ping Host", hint)
         if dlg.result is None:
             return
@@ -4930,7 +5331,7 @@ class FolderLauncher(tk.Tk):
         if not host:
             return
         if host in self._ping_hosts:
-            messagebox.showinfo("Info", f"'{host}' は既に登録済みです。", parent=self)
+            messagebox.showinfo("Info", f"'{host}' is already registered.", parent=self)
             return
         self._ping_hosts.append(host)
         self._ping_data[host] = []
@@ -4938,7 +5339,7 @@ class FolderLauncher(tk.Tk):
         self._render_list()
 
     def _ping_toggle(self):
-        """Ping モニターの ON/OFF を切り替える。"""
+        """Toggle the Ping monitor ON/OFF."""
         if self._ping_running:
             self._ping_enabled = False
             self._ping_stop()
@@ -4949,17 +5350,17 @@ class FolderLauncher(tk.Tk):
         self._render_list()
 
     def _ping_start(self):
-        """Ping モニターを開始する。"""
+        """Start the Ping monitor."""
         if self._ping_running:
             return
         self._ping_running = True
-        # 既存データを保持しつつ、新ホストの分を初期化
+        # retain existing data and initialize entries for new hosts
         for h in self._ping_hosts:
             self._ping_data.setdefault(h, [])
         self._ping_schedule_round()
 
     def _ping_stop(self):
-        """Ping モニターを停止する。"""
+        """Stop the Ping monitor."""
         self._ping_running = False
         if self._ping_next_id is not None:
             self.after_cancel(self._ping_next_id)
@@ -4969,13 +5370,13 @@ class FolderLauncher(tk.Tk):
             self._ping_graph_id = None
 
     def _ping_schedule_round(self):
-        """次の ping ラウンドをスレッドで起動する。"""
+        """Launch the next ping round in a thread."""
         if not self._ping_running:
             return
         threading.Thread(target=self._ping_round, daemon=True).start()
 
     def _ping_round(self):
-        """全ホストへ並列 ping を実行し、終了後にグラフを更新する。"""
+        """Run ping to all hosts in parallel and update the graph when done."""
         hosts = list(self._ping_hosts)
         threads = [
             threading.Thread(target=self._ping_one, args=(h,), daemon=True)
@@ -4991,7 +5392,7 @@ class FolderLauncher(tk.Tk):
             self._ping_next_id = self.after(interval_ms, self._ping_schedule_round)
 
     def _ping_one(self, host: str):
-        """1 ホストへ ping を実行し、応答時間を _ping_data に追加する。"""
+        """Run ping to a single host and append the response time to _ping_data."""
         try:
             result = subprocess.run(
                 ["ping", "-n", "1", "-w", "2000", host],
@@ -4999,14 +5400,14 @@ class FolderLauncher(tk.Tk):
                 creationflags=subprocess.CREATE_NO_WINDOW,
             )
             if "TTL=" in result.stdout or "ttl=" in result.stdout:
-                # 英語: "time=5ms" / "time<1ms"、日本語: "時間 =5ms" / "時間 <1ms"
+                # English: "time=5ms" / "time<1ms", Japanese: "時間 =5ms" / "時間 <1ms"
                 m = re.search(r"(?:[Tt]ime|時間)\s*=\s*(\d+)\s*ms", result.stdout)
                 if m:
                     ms = float(m.group(1))
                 elif re.search(r"(?:[Tt]ime|時間)\s*<", result.stdout):
-                    ms = 0.5  # <1ms は 0.5ms として扱う
+                    ms = 0.5  # treat <1ms as 0.5ms
                 else:
-                    ms = 1.0  # TTLあり・時間不詳は 1ms 扱い
+                    ms = 1.0  # TTL present but time unknown; treat as 1ms
             else:
                 ms = None
         except Exception:
@@ -5025,8 +5426,10 @@ class FolderLauncher(tk.Tk):
         outer = tk.Frame(self._list_frame, bg=C["bg"])
         outer.pack(fill="both", expand=True)
 
-        # ── Left pane: title list ──
-        left = tk.Frame(outer, bg=C["bg"], width=130)
+        # ── Left pane: title list (レスポンシブ幅: xs=80 / sm=100 / md=130) ──
+        _mw = self._width_bp()
+        _left_w = 80 if _mw == "xs" else 100 if _mw == "sm" else 130
+        left = tk.Frame(outer, bg=C["bg"], width=_left_w)
         left.pack(side="left", fill="y")
         left.pack_propagate(False)
 
@@ -5127,7 +5530,7 @@ class FolderLauncher(tk.Tk):
                     fg=C["text"], relief="flat", bd=0,
                     font=FONT_BOLD if is_sel else FONT,
                     cursor="hand2", anchor="w", padx=8, pady=4,
-                    wraplength=115, justify="left",
+                    wraplength=max(40, _left_w - 15), justify="left",
                     activebackground=C["card_h"], activeforeground=C["text"],
                 )
                 btn.pack(fill="x", pady=1)
@@ -5158,14 +5561,14 @@ class FolderLauncher(tk.Tk):
                      font=FONT_SMALL, justify="center").pack(pady=20)
             return
 
-        # 左サイドバー
+        # left sidebar
         sidebar = tk.Frame(pane, bg=C["card"], width=110,
                            highlightthickness=1, highlightbackground=C["border"])
         sidebar.pack(side="left", fill="y", padx=(0, 4))
         sidebar.pack_propagate(False)
         self._render_bm_sidebar(sidebar)
 
-        # 右メインエリア
+        # right main area
         main_frame = tk.Frame(pane, bg=C["bg"])
         main_frame.pack(side="left", fill="both", expand=True)
 
@@ -5323,201 +5726,267 @@ class FolderLauncher(tk.Tk):
         self._save_config()
         self._render_list()
 
-    # ── Calendar ───────────────────────────────────────────
+    # ── Grep（ファイル全文検索） ───────────────────────────
 
-    def _render_calendar(self):
-        """タスク締め切りカレンダーを描画する。"""
-        import calendar as _cal_mod
+    def _render_grep_list(self):
+        """Full-text file search UI."""
+        import queue as _queue
         f = self._list_frame
-        _dark = self._theme in ("dark", "claude", "scarlet", "ocean")
-        today = datetime.date.today()
 
-        # タスクを締め切り日でインデックス化
-        deadline_map: dict[str, list[dict]] = {}
-        for task in self._tasks:
-            dl = task.get("deadline", "")
-            if dl:
-                deadline_map.setdefault(dl, []).append(task)
+        top = tk.Frame(f, bg=C["bg"])
+        top.pack(fill="x", padx=6, pady=4)
 
-        # ── ナビゲーションヘッダー ──
-        nav = tk.Frame(f, bg=C["bg"])
-        nav.pack(fill="x", padx=6, pady=(6, 2))
-
-        tk.Button(nav, text="<",
-                  command=self._cal_prev_month,
-                  bg=C["card"], fg=C["text"], relief="flat", bd=0,
-                  font=FONT_BOLD, cursor="hand2", padx=10, pady=3,
+        # Folder row
+        row1 = tk.Frame(top, bg=C["bg"])
+        row1.pack(fill="x", pady=(0, 3))
+        tk.Label(row1, text="Folder", bg=C["bg"], fg=C["text_sub"],
+                 font=FONT_SMALL, width=7, anchor="w").pack(side="left")
+        folder_var = tk.StringVar(value=self._grep_folder)
+        tk.Entry(row1, textvariable=folder_var, font=FONT,
+                 bg=C["card"], fg=C["text"], relief="flat", bd=1,
+                 insertbackground=C["accent"]).pack(side="left", fill="x", expand=True, padx=(0, 4))
+        def _browse():
+            from tkinter import filedialog
+            d = filedialog.askdirectory(initialdir=folder_var.get() or ".")
+            if d:
+                folder_var.set(d)
+        tk.Button(row1, text="Browse", command=_browse,
+                  bg=C["card"], fg=C["text_sub"], relief="flat", bd=0,
+                  font=FONT_SMALL, cursor="hand2", padx=8, pady=2,
                   activebackground=C["card_h"], activeforeground=C["text"],
                   ).pack(side="left")
 
-        tk.Label(nav,
-                 text=f"{self._cal_year}  /  {self._cal_month:02d}",
-                 bg=C["bg"], fg=C["text"], font=FONT_BOLD,
-                 ).pack(side="left", fill="x", expand=True)
+        # Query row
+        row2 = tk.Frame(top, bg=C["bg"])
+        row2.pack(fill="x", pady=(0, 3))
+        tk.Label(row2, text="Query", bg=C["bg"], fg=C["text_sub"],
+                 font=FONT_SMALL, width=7, anchor="w").pack(side="left")
+        query_var = tk.StringVar(value=self._grep_query)
+        query_e = tk.Entry(row2, textvariable=query_var, font=FONT,
+                           bg=C["card"], fg=C["text"], relief="flat", bd=1,
+                           insertbackground=C["accent"])
+        query_e.pack(side="left", fill="x", expand=True, padx=(0, 4))
+        case_var = tk.BooleanVar(value=True)
+        tk.Checkbutton(row2, text="Ignore case", variable=case_var,
+                       bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL,
+                       selectcolor=C["card"], activebackground=C["bg"],
+                       cursor="hand2").pack(side="left")
 
-        tk.Button(nav, text=">",
-                  command=self._cal_next_month,
-                  bg=C["card"], fg=C["text"], relief="flat", bd=0,
-                  font=FONT_BOLD, cursor="hand2", padx=10, pady=3,
-                  activebackground=C["card_h"], activeforeground=C["text"],
-                  ).pack(side="right")
+        # Match mode row
+        row_mode = tk.Frame(top, bg=C["bg"])
+        row_mode.pack(fill="x", pady=(0, 3))
+        tk.Label(row_mode, text="Match", bg=C["bg"], fg=C["text_sub"],
+                 font=FONT_SMALL, width=7, anchor="w").pack(side="left")
+        mode_var = tk.StringVar(value="contains")
+        _rb_cfg = dict(bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL,
+                       selectcolor=C["card"], activebackground=C["bg"],
+                       cursor="hand2", variable=mode_var)
+        tk.Radiobutton(row_mode, text="Contains",   value="contains",  **_rb_cfg).pack(side="left")
+        tk.Radiobutton(row_mode, text="Starts with", value="starts",   **_rb_cfg).pack(side="left", padx=(8, 0))
+        tk.Radiobutton(row_mode, text="Ends with",   value="ends",     **_rb_cfg).pack(side="left", padx=(8, 0))
 
-        # ── カレンダーグリッド ──
-        grid_frame = tk.Frame(f, bg=C["bg"])
-        grid_frame.pack(fill="x", padx=6, pady=(0, 4))
-        for col in range(7):
-            grid_frame.columnconfigure(col, weight=1)
+        # Extension filter row
+        row_ext = tk.Frame(top, bg=C["bg"])
+        row_ext.pack(fill="x", pady=(0, 3))
+        tk.Label(row_ext, text="Ext", bg=C["bg"], fg=C["text_sub"],
+                 font=FONT_SMALL, width=7, anchor="w").pack(side="left")
+        ext_var = tk.StringVar(value=self._grep_ext)
+        tk.Entry(row_ext, textvariable=ext_var, font=FONT,
+                 bg=C["card"], fg=C["text"], relief="flat", bd=1,
+                 insertbackground=C["accent"]).pack(side="left", fill="x", expand=True, padx=(0, 4))
+        tk.Label(row_ext, text="e.g.  .py .txt .md  (blank = all)",
+                 bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL).pack(side="left")
 
-        # 曜日ヘッダー（月曜始まり）
-        DOW = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
-        DOW_FG = [C["text_sub"]] * 5 + [
-            "#6080FF" if not _dark else "#99AAFF",   # Sat
-            "#FF6060" if not _dark else "#FF9999",   # Sun
-        ]
-        for col, (d, fg) in enumerate(zip(DOW, DOW_FG)):
-            tk.Label(grid_frame, text=d, bg=C["bg"], fg=fg,
-                     font=FONT_SMALL, anchor="center",
-                     ).grid(row=0, column=col, sticky="ew", padx=1, pady=(0, 2))
+        # Button / status row
+        row3 = tk.Frame(top, bg=C["bg"])
+        row3.pack(fill="x")
+        status_var = tk.StringVar(value="Enter folder and query, then press Search.")
+        tk.Label(row3, textvariable=status_var, bg=C["bg"], fg=C["text_sub"],
+                 font=FONT_SMALL, anchor="w").pack(side="left", fill="x", expand=True)
 
-        # 日付セル
-        weeks = _cal_mod.monthcalendar(self._cal_year, self._cal_month)
-        for row_i, week in enumerate(weeks):
-            for col_i, day in enumerate(week):
-                date_str = (
-                    f"{self._cal_year}-{self._cal_month:02d}-{day:02d}"
-                    if day else ""
-                )
-                tasks_on_day = deadline_map.get(date_str, [])
-                is_today     = (day and
-                                self._cal_year == today.year and
-                                self._cal_month == today.month and
-                                day == today.day)
-                is_selected  = (day and day == self._cal_sel_day)
-                is_past      = (day and
-                                datetime.date(self._cal_year, self._cal_month, day) < today)
+        tk.Frame(f, bg=C["border"], height=1).pack(fill="x")
 
-                # セル背景色
-                if is_selected:
-                    cell_bg = C["accent"]
-                    day_fg  = "white"
-                elif is_today:
-                    cell_bg = C["accent_lt"]
-                    day_fg  = C["accent_dk"]
-                else:
-                    cell_bg = C["card"]
-                    day_fg  = C["text_sub"] if (not day or is_past) else C["text"]
+        # Results scroll area
+        res_outer = tk.Frame(f, bg=C["bg"])
+        res_outer.pack(fill="both", expand=True)
+        res_cv = tk.Canvas(res_outer, bg=C["bg"], highlightthickness=0)
+        res_vsb = tk.Scrollbar(res_outer, orient="vertical", command=res_cv.yview)
+        res_frame = tk.Frame(res_cv, bg=C["bg"])
+        res_frame.bind("<Configure>",
+                       lambda e: res_cv.configure(scrollregion=res_cv.bbox("all")))
+        _win = res_cv.create_window((0, 0), window=res_frame, anchor="nw")
+        res_cv.configure(yscrollcommand=res_vsb.set)
+        res_cv.bind("<Configure>", lambda e: res_cv.itemconfigure(_win, width=e.width))
+        res_cv.bind("<MouseWheel>",
+                    lambda e: res_cv.yview_scroll(-1 * (e.delta // 120), "units"))
+        res_cv.pack(side="left", fill="both", expand=True)
+        res_vsb.pack(side="right", fill="y")
 
-                cell = tk.Frame(grid_frame, bg=cell_bg,
-                                highlightthickness=1,
-                                highlightbackground=C["border"])
-                cell.grid(row=row_i + 1, column=col_i,
-                          sticky="nsew", padx=1, pady=1, ipady=2)
+        q = _queue.Queue()
+        self._grep_cancel = False
 
-                if day:
-                    # 日付番号
-                    dow_fg = day_fg
-                    if not is_selected and not is_today:
-                        if col_i == 5:
-                            dow_fg = "#6080FF" if not _dark else "#99AAFF"
-                        elif col_i == 6:
-                            dow_fg = "#FF6060" if not _dark else "#FF9999"
-                    tk.Label(cell, text=str(day), bg=cell_bg, fg=dow_fg,
-                             font=FONT_SMALL, anchor="nw",
-                             ).pack(anchor="nw", padx=3, pady=(1, 0))
+        def _append_file_header(rel_path, abs_path):
+            hdr = tk.Frame(res_frame, bg=C["bg"])
+            hdr.pack(fill="x", padx=4, pady=(8, 1))
+            lbl = tk.Label(hdr, text=rel_path, bg=C["bg"], fg=C["accent"],
+                           font=FONT_BOLD, anchor="w", cursor="hand2")
+            lbl.pack(side="left", fill="x", expand=True)
+            lbl.bind("<Button-1>", lambda e, p=abs_path: os.startfile(os.path.dirname(p)))
 
-                    # タスクドット or 件数
-                    if tasks_on_day:
-                        n = len(tasks_on_day)
-                        all_done = all(t.get("progress", 0) == 100 for t in tasks_on_day)
-                        any_overdue = (is_past and
-                                       any(t.get("progress", 0) < 100 for t in tasks_on_day))
-                        if any_overdue:
-                            dot_fg = "#FF6060" if not _dark else "#FF9999"
-                        elif all_done:
-                            dot_fg = "#60BB80" if not _dark else "#80DDA0"
-                        else:
-                            dot_fg = C["accent"]
-                        tk.Label(cell,
-                                 text=f"* {n}" if n > 1 else "*",
-                                 bg=cell_bg, fg=dot_fg,
-                                 font=FONT_SMALL, anchor="center",
-                                 ).pack(anchor="center")
+        def _append_match(lineno: int, line_text: str):
+            row = tk.Frame(res_frame, bg=C["card"],
+                           highlightthickness=1, highlightbackground=C["border"])
+            row.pack(fill="x", padx=4, pady=1)
+            tk.Label(row, text=f"{lineno:5d}", bg=C["card"], fg=C["text_sub"],
+                     font=("Consolas", max(7, FONT_BASE - 2)),
+                     anchor="e", width=6).pack(side="left")
+            tk.Frame(row, bg=C["border"], width=1).pack(side="left", fill="y")
+            tk.Label(row, text=line_text[:200], bg=C["card"], fg=C["text"],
+                     font=("Consolas", max(7, FONT_BASE - 2)),
+                     anchor="w").pack(side="left", padx=6, fill="x", expand=True)
 
-                    # クリックで選択
-                    def _on_click(d=day):
-                        self._cal_sel_day = d if self._cal_sel_day != d else None
-                        self._render_list()
-                    cell.bind("<Button-1>", lambda e, d=day: _on_click(d))
-                    for child in cell.winfo_children():
-                        child.bind("<Button-1>", lambda e, d=day: _on_click(d))
+        def _poll():
+            try:
+                while True:
+                    item = q.get_nowait()
+                    kind = item[0]
+                    if kind == "file":
+                        _append_file_header(item[1], item[2])
+                    elif kind == "match":
+                        _append_match(item[1], item[2])
+                    elif kind == "status":
+                        status_var.set(item[1])
+                    elif kind == "done":
+                        _on_done(item[1], item[2], item[3])
+                        return
+            except _queue.Empty:
+                pass
+            if self._grep_running:
+                self.after(60, _poll)
 
-        # ── 選択日のタスク詳細 ──
-        if self._cal_sel_day:
-            date_str = f"{self._cal_year}-{self._cal_month:02d}-{self._cal_sel_day:02d}"
-            tasks_on_day = deadline_map.get(date_str, [])
-
-            detail = tk.Frame(f, bg=C["card"],
-                              highlightthickness=1, highlightbackground=C["border"])
-            detail.pack(fill="x", padx=6, pady=(2, 4))
-
-            tk.Label(detail,
-                     text=f"{self._cal_year}/{self._cal_month:02d}/{self._cal_sel_day:02d}",
-                     bg=C["card"], fg=C["accent"], font=FONT_BOLD,
-                     ).pack(anchor="w", padx=8, pady=(5, 2))
-
-            if not tasks_on_day:
-                tk.Label(detail, text="No tasks due.",
-                         bg=C["card"], fg=C["text_sub"], font=FONT_SMALL,
-                         ).pack(anchor="w", padx=12, pady=(0, 6))
+        def _on_done(cancelled: bool, file_count: int, match_count: int):
+            self._grep_running = False
+            search_btn.configure(text="Search", command=_start_search,
+                                 bg=C["accent"])
+            if cancelled:
+                status_var.set(f"Cancelled — {file_count} file(s), {match_count} match(es)")
+            elif match_count == 0:
+                status_var.set("No matches found.")
+                tk.Label(res_frame, text="No matches found.",
+                         bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL).pack(pady=20)
             else:
-                for task in tasks_on_day:
-                    pct  = task.get("progress", 0)
-                    name = f"[{task['event']}] {task.get('process','')}"
-                    if pct == 100:
-                        color = "#60BB80" if not _dark else "#80DDA0"
-                        suffix = "  (done)"
-                    elif pct > 0:
-                        color = C["accent"]
-                        suffix = f"  {pct}%"
-                    else:
-                        color = C["text"]
-                        suffix = "  (todo)"
-                    row = tk.Frame(detail, bg=C["card"])
-                    row.pack(fill="x", padx=8, pady=1)
-                    tk.Label(row, text=name + suffix,
-                             bg=C["card"], fg=color, font=FONT_SMALL,
-                             anchor="w").pack(side="left")
-                tk.Frame(detail, bg=C["card"], height=4).pack()
+                status_var.set(f"Done — {file_count} file(s), {match_count} match(es)")
 
-    def _cal_prev_month(self):
-        if self._cal_month == 1:
-            self._cal_year -= 1
-            self._cal_month = 12
-        else:
-            self._cal_month -= 1
-        self._cal_sel_day = None
-        self._render_list()
+        def _parse_exts(raw: str) -> set[str]:
+            """Parse extension filter string into a set of lowercased dotted exts."""
+            exts = set()
+            for token in raw.replace(",", " ").split():
+                token = token.lower()
+                if not token.startswith("."):
+                    token = "." + token
+                exts.add(token)
+            return exts
 
-    def _cal_next_month(self):
-        if self._cal_month == 12:
-            self._cal_year += 1
-            self._cal_month = 1
-        else:
-            self._cal_month += 1
-        self._cal_sel_day = None
-        self._render_list()
+        def _search_thread(folder: str, query: str, ignore_case: bool,
+                           exts: set[str], mode: str):
+            file_count = 0
+            match_count = 0
+            try:
+                for root, dirs, files in os.walk(folder):
+                    if self._grep_cancel:
+                        break
+                    dirs[:] = sorted(d for d in dirs if not d.startswith('.'))
+                    for filename in sorted(files):
+                        if self._grep_cancel:
+                            break
+                        # Extension filter
+                        if exts:
+                            _, ext = os.path.splitext(filename)
+                            if ext.lower() not in exts:
+                                continue
+                        filepath = os.path.join(root, filename)
+                        rel = os.path.relpath(filepath, folder)
+                        file_matches: list[tuple[int, str]] = []
+                        try:
+                            lines = None
+                            for enc in ("utf-8", "shift-jis", "latin-1"):
+                                try:
+                                    with open(filepath, "r", encoding=enc, errors="strict") as fh:
+                                        lines = fh.readlines()
+                                    break
+                                except (UnicodeDecodeError, LookupError, OSError):
+                                    continue
+                            if lines is None:
+                                continue
+                            cq = query.lower() if ignore_case else query
+                            for lineno, line in enumerate(lines, 1):
+                                cl = line.lower() if ignore_case else line
+                                stripped = cl.rstrip("\r\n")
+                                if mode == "starts":
+                                    hit = stripped.lstrip().startswith(cq)
+                                elif mode == "ends":
+                                    hit = stripped.rstrip().endswith(cq)
+                                else:
+                                    hit = cq in cl
+                                if hit:
+                                    file_matches.append((lineno, line.rstrip()))
+                        except Exception:
+                            continue
+                        if file_matches:
+                            file_count += 1
+                            match_count += len(file_matches)
+                            q.put(("file", rel, filepath))
+                            for ln, lc in file_matches:
+                                q.put(("match", ln, lc))
+                            q.put(("status", f"Searching… {file_count} file(s), {match_count} match(es)"))
+            finally:
+                q.put(("done", self._grep_cancel, file_count, match_count))
 
-    def _cal_go_today(self):
-        today = datetime.date.today()
-        self._cal_year  = today.year
-        self._cal_month = today.month
-        self._cal_sel_day = today.day
-        self._render_list()
+        def _start_search():
+            folder = folder_var.get().strip()
+            query  = query_var.get()
+            if not folder:
+                status_var.set("Please specify a folder.")
+                return
+            if not query:
+                status_var.set("Please enter a search query.")
+                return
+            if not os.path.isdir(folder):
+                status_var.set("Folder does not exist.")
+                return
+            self._grep_folder = folder
+            self._grep_query  = query
+            self._grep_ext    = ext_var.get().strip()
+            self._save_config()
+            for w in res_frame.winfo_children():
+                w.destroy()
+            self._grep_cancel  = False
+            self._grep_running = True
+            search_btn.configure(text="Cancel", command=_cancel_search,
+                                 bg=C["btn_del"])
+            status_var.set("Searching…")
+            exts = _parse_exts(self._grep_ext)
+            threading.Thread(target=_search_thread,
+                             args=(folder, query, case_var.get(), exts, mode_var.get()),
+                             daemon=True).start()
+            self.after(60, _poll)
+
+        def _cancel_search():
+            self._grep_cancel = True
+            status_var.set("Cancelling…")
+
+        search_btn = tk.Button(row3, text="Search", command=_start_search,
+                               bg=C["accent"], fg="white", relief="flat", bd=0,
+                               font=FONT_BOLD, cursor="hand2", padx=16, pady=3,
+                               activebackground=C["accent_dk"], activeforeground="white")
+        search_btn.pack(side="right")
+        query_e.bind("<Return>", lambda e: _start_search())
+        query_e.focus_set()
 
     # ── Pomodoro ───────────────────────────────────────────
 
     def _render_pomodoro(self):
-        """ポモドーロタブを描画する。"""
+        """Render the Pomodoro tab."""
         f = self._list_frame
         _dark = self._theme in ("dark", "claude", "scarlet", "ocean")
 
@@ -5533,12 +6002,12 @@ class FolderLauncher(tk.Tk):
             "paused":     C["text_sub"],
         }
 
-        # ── タイマーカード ──
+        # ── timer card ──
         card = tk.Frame(f, bg=C["card"],
                         highlightthickness=1, highlightbackground=C["border"])
         card.pack(fill="x", padx=6, pady=(6, 3))
 
-        # 1行目: [状態]  [MM:SS]  [サイクル]
+        # row 1: [state]  [MM:SS]  [cycle]
         row1 = tk.Frame(card, bg=C["card"])
         row1.pack(fill="x", padx=10, pady=(6, 2))
 
@@ -5565,13 +6034,13 @@ class FolderLauncher(tk.Tk):
         )
         self._pomo_lbl_cycle.pack(side="left")
 
-        # 2行目: プログレスバー（細い横バー）
+        # row 2: progress bar (thin horizontal bar)
         self._pomo_canvas = tk.Canvas(card, height=6, bg=C["border"],
                                       highlightthickness=0)
         self._pomo_canvas.pack(fill="x", padx=10, pady=(2, 6))
         self._pomo_draw_arc()
 
-        # ── ボタン行 ──
+        # ── button row ──
         btn_row = tk.Frame(f, bg=C["bg"])
         btn_row.pack(fill="x", padx=6, pady=(0, 3))
 
@@ -5597,7 +6066,7 @@ class FolderLauncher(tk.Tk):
                   activebackground=C["card_h"], activeforeground=C["text"],
                   ).pack(side="left", fill="x", expand=True)
 
-        # ── リンクタスク ──
+        # ── linked task ──
         task_row = tk.Frame(f, bg=C["bg"])
         task_row.pack(fill="x", padx=6, pady=(0, 3))
 
@@ -5635,7 +6104,7 @@ class FolderLauncher(tk.Tk):
                         break
         task_var.trace_add("write", _on_task_select)
 
-        # ── 統計 ──
+        # ── statistics ──
         tk.Label(f,
                  text=f"Sessions: {self._pomo_session}   "
                       f"{self._pomo_work_min}m / {self._pomo_break_min}m / {self._pomo_long_break_min}m",
@@ -5649,7 +6118,7 @@ class FolderLauncher(tk.Tk):
         return dots.strip()
 
     def _pomo_draw_arc(self):
-        """円形プログレスバーを描画する。"""
+        """Draw the circular progress bar."""
         c = self._pomo_canvas
         if c is None:
             return
@@ -5716,7 +6185,7 @@ class FolderLauncher(tk.Tk):
             return
         self._pomo_remaining -= 1
 
-        # ラベル更新（タブが表示中のみ）
+        # update labels (only when tab is shown)
         if self._pomo_lbl_time is not None:
             mins, secs = divmod(self._pomo_remaining, 60)
             try:
@@ -5740,7 +6209,7 @@ class FolderLauncher(tk.Tk):
         if self._pomo_state == "work":
             self._pomo_session += 1
             self._pomo_cycle += 1
-            # リンクタスクに作業ログを記録
+            # record work log to linked task
             if self._pomo_task_idx is not None and self._pomo_task_idx < len(self._tasks):
                 task = self._tasks[self._pomo_task_idx]
                 now = datetime.datetime.now()
@@ -5751,7 +6220,7 @@ class FolderLauncher(tk.Tk):
                     "note":  "Pomodoro",
                 })
                 self._save_config()
-            # 4サイクルで長休憩
+            # long break after every 4 cycles
             if self._pomo_cycle % 4 == 0:
                 self._pomo_state = "long_break"
                 self._pomo_remaining = self._pomo_long_break_min * 60
@@ -5765,7 +6234,7 @@ class FolderLauncher(tk.Tk):
         if self._active == -10:
             self._render_list()
         else:
-            # バックグラウンドでも自動開始
+            # auto-start even in the background
             self._pomo_after_id = self.after(1000, self._pomo_tick)
 
     def _pomo_open_settings(self):
@@ -6049,7 +6518,7 @@ class FolderLauncher(tk.Tk):
                   background=[("selected", C["card_h"])],
                   foreground=[("selected", C["text"])])
 
-        # 上部ツールバー（Summary / Kanban toggle）
+        # top toolbar (Summary / Kanban toggle)
         toolbar = tk.Frame(self._list_frame, bg=C["bg"])
         toolbar.pack(fill="x", padx=2, pady=(2, 0))
         tk.Button(toolbar, text="Work Summary",
@@ -6075,7 +6544,7 @@ class FolderLauncher(tk.Tk):
             self._render_kanban()
             return
 
-        # 作業中バー
+        # work-in-progress bar
         self._work_bar_lbl = None
         if self._work_active is not None:
             wa   = self._work_active
@@ -6085,7 +6554,7 @@ class FolderLauncher(tk.Tk):
             bar.pack(fill="x", padx=2, pady=(2, 0))
             self._work_bar_lbl = tk.Label(
                 bar,
-                text=f"{task.get('process', '')}  作業中...  {_fmt_duration(elapsed)}",
+                text=f"{task.get('process', '')}  Working...  {_fmt_duration(elapsed)}",
                 bg=C["accent_lt"], fg=C["accent_dk"], font=FONT_BOLD, anchor="w",
             )
             self._work_bar_lbl.pack(side="left", padx=10, pady=5)
@@ -6193,10 +6662,43 @@ class FolderLauncher(tk.Tk):
         tree.column("remaining", width=68,  minwidth=55,  stretch=False)
         tree.column("updated",   width=82,  minwidth=70,  stretch=False)
 
+        def _resize_tree_cols(w: int):
+            """ウィジェット幅に応じてTreeviewのカラム表示を切り替える。"""
+            if w < 340:
+                # xs: Event + Process のみ
+                tree["displaycolumns"] = ("process",)
+                tree.column("#0",      width=max(60, w // 2), stretch=True)
+                tree.column("process", width=max(60, w // 2), stretch=True)
+            elif w < 480:
+                # sm: Event + Process + Progress + Deadline
+                tree["displaycolumns"] = ("process", "progress", "deadline")
+                tree.column("#0",       width=max(70, w // 3), stretch=True)
+                tree.column("process",  width=max(70, w // 2), stretch=False)
+                tree.column("progress", width=55, stretch=False)
+                tree.column("deadline", width=76, stretch=False)
+            else:
+                # md: 全カラム表示
+                tree["displaycolumns"] = cols
+                tree.column("#0",        width=100, minwidth=70,  stretch=True)
+                tree.column("process",   width=170, minwidth=70,  stretch=False)
+                tree.column("content",   width=120, minwidth=60,  stretch=True)
+                tree.column("progress",  width=58,  minwidth=45,  stretch=False)
+                tree.column("deadline",  width=82,  minwidth=70,  stretch=False)
+                tree.column("remaining", width=68,  minwidth=55,  stretch=False)
+                tree.column("updated",   width=82,  minwidth=70,  stretch=False)
+
         vsb = ttk.Scrollbar(tree_wrap, orient="vertical", command=tree.yview)
         tree.configure(yscrollcommand=vsb.set)
         tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
+
+        # ウィジェット幅変化時にカラムを再調整
+        tree_wrap.bind("<Configure>", lambda e: _resize_tree_cols(e.width))
+        # 初期適用
+        try:
+            _resize_tree_cols(self.winfo_width())
+        except Exception:
+            pass
 
         # row color by progress (red=critical / yellow=caution / green=ok)
         _dark = self._theme in ("dark", "claude", "scarlet", "ocean")
@@ -6233,10 +6735,22 @@ class FolderLauncher(tk.Tk):
                 process_disp = task.get("process", "")
                 if _recur_badge:
                     process_disp = f"{_recur_badge} {process_disp}"
-                tree.insert(parent, "end", iid=str(i), text="",
+                _subtasks = task.get("subtasks", [])
+                task_iid = str(i)
+                tree.insert(parent, "end", iid=task_iid,
+                            text="", open=bool(_subtasks),
                             tags=(_progress_tag(pct),),
                             values=(process_disp, content,
                                     f"{pct}%", deadline, remaining, updated))
+                # insert subtasks as child rows
+                for si, sub in enumerate(_subtasks):
+                    sub_pct = 100 if sub.get("done") else sub.get("progress", 0)
+                    sub_dl  = sub.get("deadline", "")
+                    sub_rem = _days_left_str(sub_dl)
+                    tree.insert(task_iid, "end", iid=f"{i}.{si}",
+                                text=sub.get("title", ""),
+                                tags=(_progress_tag(sub_pct),),
+                                values=("", "", f"{sub_pct}%", sub_dl, sub_rem, ""))
 
         # detail panel (show full text of selected row)
         tk.Frame(self._list_frame, bg=C["border"], height=1).pack(
@@ -6257,14 +6771,39 @@ class FolderLauncher(tk.Tk):
         work_row = tk.Frame(detail_bg, bg=C["card"])
         work_row.pack(fill="x", padx=6, pady=(0, 4))
 
+        def _clear_detail():
+            for fr in (folder_frame, memo_row, work_row):
+                for w in fr.winfo_children():
+                    w.destroy()
+
         def on_select(_e):
             sel = tree.selection()
             if not sel:
                 return
+            iid = sel[0]
+
+            # ── when a subtask row is selected ──────────────────────
+            if "." in iid:
+                task_idx, sub_idx = map(int, iid.split("."))
+                sub = self._tasks[task_idx]["subtasks"][sub_idx]
+                sub_dl  = sub.get("deadline", "")
+                sub_rem = _days_left_str(sub_dl)
+                dl_part = f"  Deadline: {sub_dl}  ({sub_rem})" if sub_dl else ""
+                pct     = 100 if sub.get("done") else sub.get("progress", 0)
+                done_str = "  ✓ Done" if sub.get("done") else ""
+                detail_lbl.configure(fg=C["text"], text=(
+                    f"[subtask]  {sub.get('title', '')}"
+                    f"  {pct}%{dl_part}{done_str}"
+                ))
+                _clear_detail()
+                return
+
+            # ── skip non-task rows (event parent rows) ────────────
             try:
-                idx = int(sel[0])
+                idx = int(iid)
             except ValueError:
-                return  # skip event parent rows
+                return
+
             task = self._tasks[idx]
             deadline  = task.get("deadline", "")
             remaining = _days_left_str(deadline)
@@ -6276,7 +6815,7 @@ class FolderLauncher(tk.Tk):
                 f"{task.get('content', '')}"
             ))
 
-            # 作業フォルダ ボタン群（毎回再構築）
+            # work folder buttons (rebuilt each time)
             for w in folder_frame.winfo_children():
                 w.destroy()
             wfs = task.get("work_folders", [])
@@ -6319,7 +6858,7 @@ class FolderLauncher(tk.Tk):
                       activeforeground=C["accent_dk"],
                       ).pack(side="right")
 
-            # 作業時間ログ行（毎回再構築）
+            # work time log row (rebuilt each time)
             for w in work_row.winfo_children():
                 w.destroy()
             logs = task.get("work_logs", [])
@@ -6373,19 +6912,22 @@ class FolderLauncher(tk.Tk):
         # ── Drag & drop reordering ──
         dnd: dict = {"src": None, "moved": False}
 
-        def _is_task_row(iid: str) -> bool:
+        def _row_type(iid: str) -> str:
+            """Return the type of iid: 'event' | 'task' | 'subtask'"""
+            if "." in iid:
+                return "subtask"
             try:
                 int(iid)
-                return True
+                return "task"
             except ValueError:
-                return False
+                return "event"
 
         def on_dnd_press(e):
             region = tree.identify_region(e.x, e.y)
             if region not in ("cell", "tree"):
                 return
             item = tree.identify_row(e.y)
-            dnd["src"] = item if (item and _is_task_row(item)) else None
+            dnd["src"] = item if (item and _row_type(item) != "event") else None
             dnd["moved"] = False
 
         def on_dnd_motion(e):
@@ -6395,22 +6937,28 @@ class FolderLauncher(tk.Tk):
             target = tree.identify_row(e.y)
             if not target or target == src:
                 return
-            src_is_task = _is_task_row(src)
-            tgt_is_task = _is_task_row(target)
+            src_type = _row_type(src)
+            tgt_type = _row_type(target)
             bbox = tree.bbox(target)
             if not bbox:
                 return
             tgt_idx = tree.index(target)
             if e.y >= bbox[1] + bbox[3] // 2:
                 tgt_idx += 1
-            if src_is_task and tgt_is_task:
-                # タスク行 → 同グループ内でのみ移動
+            if src_type == "task" and tgt_type == "task":
+                # task row → move only within the same group
                 if tree.parent(src) != tree.parent(target):
                     return
                 tree.move(src, tree.parent(src), tgt_idx)
                 dnd["moved"] = True
-            elif not src_is_task and not tgt_is_task:
-                # イベント行 → グループごと並び替え
+            elif src_type == "subtask" and tgt_type == "subtask":
+                # subtask row → move only within the same task
+                if tree.parent(src) != tree.parent(target):
+                    return
+                tree.move(src, tree.parent(src), tgt_idx)
+                dnd["moved"] = True
+            elif src_type == "event" and tgt_type == "event":
+                # event row → reorder whole groups
                 tree.move(src, "", tgt_idx)
                 dnd["moved"] = True
 
@@ -6419,15 +6967,29 @@ class FolderLauncher(tk.Tk):
             dnd["src"] = None
             if not src or not dnd["moved"]:
                 return
-            # rebuild self._tasks from current tree order
-            new_tasks = []
-            for ev_row in tree.get_children():
-                for child in tree.get_children(ev_row):
-                    new_tasks.append(self._tasks[int(child)])
-            self._tasks[:] = new_tasks
-            self._task_sort = {"col": None, "reverse": False}
-            self._save_tasks()
-            self._render_list()
+            src_type = _row_type(src)
+            if src_type == "subtask":
+                # rebuild subtask order
+                task_iid = tree.parent(src)
+                task_idx = int(task_iid)
+                old_subs = self._tasks[task_idx].get("subtasks", [])
+                new_subs = []
+                for sub_iid in tree.get_children(task_iid):
+                    _, si = map(int, sub_iid.split("."))
+                    new_subs.append(old_subs[si])
+                self._tasks[task_idx]["subtasks"] = new_subs
+                self._save_tasks()
+                self._render_list()
+            else:
+                # rebuild task/event order
+                new_tasks = []
+                for ev_row in tree.get_children():
+                    for child in tree.get_children(ev_row):
+                        new_tasks.append(self._tasks[int(child)])
+                self._tasks[:] = new_tasks
+                self._task_sort = {"col": None, "reverse": False}
+                self._save_tasks()
+                self._render_list()
 
         tree.bind("<ButtonPress-1>",   on_dnd_press)
         tree.bind("<B1-Motion>",       on_dnd_motion)
@@ -6437,12 +6999,17 @@ class FolderLauncher(tk.Tk):
         sel = tree.selection()
         if not sel:
             return
+        iid = sel[0]
+        if "." in iid:
+            task_idx, sub_idx = map(int, iid.split("."))
+            self._edit_subtask(task_idx, sub_idx)
+            return
         try:
-            idx = int(sel[0])
+            idx = int(iid)
             self._edit_task(idx)
         except ValueError:
-            # イベント親行のダブルクリック → リネーム
-            self._rename_event(tree.item(sel[0], "text"))
+            # double-click on event parent row → rename
+            self._rename_event(tree.item(iid, "text"))
 
     def _task_tree_menu(self, event, tree):
         row = tree.identify_row(event.y)
@@ -6453,27 +7020,77 @@ class FolderLauncher(tk.Tk):
                        bg=C["card"], fg=C["text"],
                        activebackground=C["card_h"], activeforeground=C["text"],
                        relief="flat", font=FONT)
-        try:
-            idx = int(row)
-            # タスク行
-            is_running = (self._work_active is not None and
-                          self._work_active["task_idx"] == idx)
-            if is_running:
-                menu.add_command(label="Stop Work",
-                                 command=lambda: self._stop_work(idx))
-            else:
-                menu.add_command(label="Start Work",
-                                 command=lambda: self._start_work(idx))
+
+        if "." in row:
+            # subtask row
+            task_idx, sub_idx = map(int, row.split("."))
+            sub = self._tasks[task_idx]["subtasks"][sub_idx]
+            is_done = sub.get("done", False)
+            menu.add_command(label="Edit Subtask",
+                             command=lambda: self._edit_subtask(task_idx, sub_idx))
             menu.add_separator()
-            menu.add_command(label="Edit",   command=lambda: self._edit_task(idx))
+            menu.add_command(
+                label="Mark Undone" if is_done else "Mark Done",
+                command=lambda: self._toggle_subtask_done(task_idx, sub_idx))
             menu.add_separator()
-            menu.add_command(label="Delete", command=lambda: self._remove_task(idx))
-        except ValueError:
-            # イベント親行
-            ev_name = tree.item(row, "text")
-            menu.add_command(label="Rename",
-                             command=lambda: self._rename_event(ev_name))
+            menu.add_command(label="Delete Subtask",
+                             command=lambda: self._remove_subtask(task_idx, sub_idx))
+        else:
+            try:
+                idx = int(row)
+                # task row
+                is_running = (self._work_active is not None and
+                              self._work_active["task_idx"] == idx)
+                if is_running:
+                    menu.add_command(label="Stop Work",
+                                     command=lambda: self._stop_work(idx))
+                else:
+                    menu.add_command(label="Start Work",
+                                     command=lambda: self._start_work(idx))
+                menu.add_separator()
+                menu.add_command(label="Add Subtask",
+                                 command=lambda: self._add_subtask(idx))
+                menu.add_separator()
+                menu.add_command(label="Edit",   command=lambda: self._edit_task(idx))
+                menu.add_separator()
+                menu.add_command(label="Delete", command=lambda: self._remove_task(idx))
+            except ValueError:
+                # event parent row
+                ev_name = tree.item(row, "text")
+                menu.add_command(label="Rename",
+                                 command=lambda: self._rename_event(ev_name))
         menu.tk_popup(event.x_root, event.y_root)
+
+    # ── Subtask operations ─────────────────────────────────
+
+    def _add_subtask(self, task_idx: int):
+        dlg = SubtaskDialog(self)
+        if dlg.result is None:
+            return
+        self._tasks[task_idx].setdefault("subtasks", []).append(dlg.result)
+        self._save_tasks()
+        self._render_list()
+
+    def _edit_subtask(self, task_idx: int, sub_idx: int):
+        sub = self._tasks[task_idx]["subtasks"][sub_idx]
+        dlg = SubtaskDialog(self, initial=sub)
+        if dlg.result is None:
+            return
+        self._tasks[task_idx]["subtasks"][sub_idx] = dlg.result
+        self._save_tasks()
+        self._render_list()
+
+    def _remove_subtask(self, task_idx: int, sub_idx: int):
+        self._tasks[task_idx].get("subtasks", []).pop(sub_idx)
+        self._save_tasks()
+        self._render_list()
+
+    def _toggle_subtask_done(self, task_idx: int, sub_idx: int):
+        sub = self._tasks[task_idx]["subtasks"][sub_idx]
+        sub["done"] = not sub.get("done", False)
+        sub["progress"] = 100 if sub["done"] else sub.get("progress", 0)
+        self._save_tasks()
+        self._render_list()
 
     # ── Task operations ───────────────────────────────────
 
@@ -6485,8 +7102,8 @@ class FolderLauncher(tk.Tk):
         if dlg.result is None:
             return
         today = datetime.date.today().isoformat()
-        dlg.result["created_at"] = today   # 作成日
-        dlg.result["updated"]    = today   # 最終更新日
+        dlg.result["created_at"] = today   # creation date
+        dlg.result["updated"]    = today   # last updated date
         self._tasks.append(dlg.result)
         self._save_tasks()
         self._render_list()
@@ -6497,12 +7114,12 @@ class FolderLauncher(tk.Tk):
         if dlg.result is None:
             return
         prev_progress = self._tasks[idx].get("progress", 0)
-        # 既存フィールド（memos, created_at 等）を保持しつつ上書き
+        # overwrite while preserving existing fields (memos, created_at, etc.)
         merged = dict(self._tasks[idx])
         merged.update(dlg.result)
         merged["updated"] = datetime.date.today().isoformat()
         self._tasks[idx] = merged
-        # 繰り返しタスク：完了時に次回分を生成
+        # recurring task: spawn the next occurrence when completed
         if merged.get("recur", "none") != "none" and merged.get("progress", 0) == 100 and prev_progress < 100:
             self._spawn_recurring(merged)
         self._save_tasks()
@@ -6512,7 +7129,7 @@ class FolderLauncher(tk.Tk):
 
     @staticmethod
     def _next_recur_date(base: str, recur: str) -> str:
-        """繰り返し種別に応じて次回の締め切り日を返す。"""
+        """Return the next deadline date according to the recurrence type."""
         try:
             d = datetime.date.fromisoformat(base) if base else datetime.date.today()
         except ValueError:
@@ -6538,7 +7155,7 @@ class FolderLauncher(tk.Tk):
         return d.isoformat()
 
     def _spawn_recurring(self, source: dict):
-        """完了した繰り返しタスクの次回分を生成して追加する。"""
+        """Generate and append the next occurrence of a completed recurring task."""
         recur = source.get("recur", "none")
         if recur == "none":
             return
@@ -6557,7 +7174,7 @@ class FolderLauncher(tk.Tk):
         self._tasks.append(new_task)
 
     def _check_recurring_tasks(self):
-        """起動時に繰り返しタスクの未生成分を補完する。"""
+        """Fill in any ungenerated recurring task occurrences at startup."""
         today = datetime.date.today()
         to_add = []
         for task in self._tasks:
@@ -6572,7 +7189,7 @@ class FolderLauncher(tk.Tk):
                 continue
             if next_date > today:
                 continue
-            # 同じ event+process+recur で未完了のものがなければ生成
+            # spawn only if no incomplete task with the same event+process+recur exists
             exists = any(
                 t.get("recur") == recur
                 and t.get("event") == task["event"]
@@ -6600,7 +7217,7 @@ class FolderLauncher(tk.Tk):
     # ── Work time tracking ────────────────────────────────
 
     def _work_anim_step(self):
-        """作業中バーのドットアニメーションを更新する。"""
+        """Update the dot animation on the work-in-progress bar."""
         if self._work_anim_id is not None:
             self.after_cancel(self._work_anim_id)
             self._work_anim_id = None
@@ -6615,16 +7232,16 @@ class FolderLauncher(tk.Tk):
         task = self._tasks[wa["task_idx"]]
         elapsed = (datetime.datetime.now() - wa["start"]).total_seconds()
         lbl.configure(
-            text=f"{task.get('process', '')}  作業中{dots}  {_fmt_duration(elapsed)}"
+            text=f"{task.get('process', '')}  Working{dots}  {_fmt_duration(elapsed)}"
         )
         self._work_anim_id = self.after(500, self._work_anim_step)
 
     def _start_work(self, task_idx: int):
-        """作業開始：現在時刻を記録する。"""
+        """Start work: record the current time."""
         if self._work_active is not None:
             if not messagebox.askyesno(
-                "作業中",
-                "別のタスクの作業中です。切り替えますか？",
+                "Working",
+                "Another task is in progress. Switch to this one?",
                 parent=self,
             ):
                 return
@@ -6636,7 +7253,7 @@ class FolderLauncher(tk.Tk):
         self._render_list()
 
     def _stop_work(self, task_idx: int):
-        """作業終了：ログに記録して保存する。"""
+        """Stop work: record to log and save."""
         if self._work_active is None:
             return
         start_dt = self._work_active["start"]
@@ -6662,6 +7279,22 @@ class FolderLauncher(tk.Tk):
     def _set_card_size(self, size: str):
         self._card_size = size
         self._save_config()
+        self._render_list()
+
+    def _set_font_size(self, size: int):
+        """フォントサイズを変更してUIを再構築する。"""
+        self._font_size = size
+        _update_fonts(size)
+        self._save_config()
+        # テーマ変更と同様に全ウィジェットを破棄して再構築
+        if self._tick_id is not None:
+            self.after_cancel(self._tick_id)
+            self._tick_id = None
+        for w in self.winfo_children():
+            w.destroy()
+        self.configure(bg=C["bg"])
+        self._build_ui()
+        self._render_tabs()
         self._render_list()
 
     def _open_transparency_dialog(self):
@@ -6940,7 +7573,7 @@ class FolderLauncher(tk.Tk):
         _tick_sleep()
 
     def _open_work_log(self, task_idx: int):
-        """作業ログ一覧・削除ダイアログを開く。"""
+        """Open the work log list and delete dialog."""
         task = self._tasks[task_idx]
         logs = task.get("work_logs", [])
 
@@ -6950,11 +7583,11 @@ class FolderLauncher(tk.Tk):
         dlg.resizable(False, False)
         dlg.grab_set()
 
-        # ヘッダー
+        # header
         tk.Label(dlg, text=f"Work Log  [{task.get('event', '')}] {task.get('process', '')}",
                  bg=C["bg"], fg=C["text"], font=FONT_BOLD).pack(padx=16, pady=(12, 4), anchor="w")
 
-        # ログ一覧フレーム
+        # log list frame
         frame = tk.Frame(dlg, bg=C["bg"])
         frame.pack(fill="both", expand=True, padx=16, pady=(0, 8))
 
@@ -6963,7 +7596,7 @@ class FolderLauncher(tk.Tk):
                 w.destroy()
             logs = task.get("work_logs", [])
             if not logs:
-                tk.Label(frame, text="記録なし", bg=C["bg"], fg=C["text_sub"],
+                tk.Label(frame, text="No records", bg=C["bg"], fg=C["text_sub"],
                          font=FONT_SMALL).pack(pady=8)
                 return
             total_sec = 0
@@ -6995,7 +7628,7 @@ class FolderLauncher(tk.Tk):
                           ).pack(side="right", padx=4)
 
             tk.Frame(frame, bg=C["border"], height=1).pack(fill="x", pady=(4, 0))
-            tk.Label(frame, text=f"合計  {_fmt_duration(total_sec)}",
+            tk.Label(frame, text=f"Total  {_fmt_duration(total_sec)}",
                      bg=C["bg"], fg=C["text"], font=FONT_BOLD,
                      anchor="e").pack(fill="x", pady=(2, 0))
 
@@ -7018,13 +7651,13 @@ class FolderLauncher(tk.Tk):
         dlg.wait_window()
 
     def _open_work_summary(self):
-        """日別・タスク別の作業時間サマリーウィンドウを開く。"""
+        """Open the daily/task work time summary window."""
         win = tk.Toplevel(self)
         win.title("Work Summary")
         win.configure(bg=C["bg"])
         win.grab_set()
 
-        # 全ログを日付ごとに集計
+        # aggregate all logs by date
         # records: [(date_str, event, process, seconds)]
         records = []
         for task in self._tasks:
@@ -7087,9 +7720,9 @@ class FolderLauncher(tk.Tk):
         vsb.pack(side="right", fill="y")
 
         if not records:
-            tree.insert("", "end", text="記録なし", values=("", "", "", ""))
+            tree.insert("", "end", text="No records", values=("", "", "", ""))
         else:
-            # 日付ごとにグループ化
+            # group by date
             from collections import defaultdict
             by_date: dict[str, list] = defaultdict(list)
             for date, ev, proc, sec, t_s, t_e in sorted(records):
@@ -7116,17 +7749,23 @@ class FolderLauncher(tk.Tk):
         win.geometry(f"+{px}+{py}")
 
     def _export_tasks(self):
-        """タスク一覧をテキストファイルに出力してエクスプローラーで開く。"""
+        """Export the task list to a text file and open it in Explorer."""
         if not self._tasks:
-            messagebox.showinfo("Export", "タスクが登録されていません。", parent=self)
+            messagebox.showinfo("Export", "No tasks registered.", parent=self)
             return
+
+        include_prev = messagebox.askyesno(
+            "Yesterday's Work Log",
+            "Include yesterday's work log in the export?",
+            parent=self,
+        )
 
         save_path = filedialog.asksaveasfilename(
             parent=self,
-            title="タスクをエクスポート",
+            title="Export Tasks",
             defaultextension=".txt",
             initialfile=f"tasks_{datetime.datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
-            filetypes=[("テキストファイル", "*.txt"), ("すべてのファイル", "*.*")],
+            filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
         )
         if not save_path:
             return
@@ -7141,13 +7780,13 @@ class FolderLauncher(tk.Tk):
             try:
                 d = datetime.date.fromisoformat(dl_str)
                 delta = (d - today).days
-                if delta > 0:  return f"あと {delta} 日"
-                if delta == 0: return "今日が締切"
-                return f"{abs(delta)} 日超過"
+                if delta > 0:  return f"{delta} day(s) left"
+                if delta == 0: return "Due today"
+                return f"{abs(delta)} day(s) overdue"
             except ValueError:
                 return ""
 
-        # イベントでグループ化（順序保持）
+        # group by event (preserve insertion order)
         groups: dict[str, list[dict]] = {}
         for task in self._tasks:
             groups.setdefault(task["event"], []).append(task)
@@ -7160,58 +7799,59 @@ class FolderLauncher(tk.Tk):
         SEP1 = "━" * 50
         SEP2 = "-" * 50
 
-        # ── 前日作業実績セクション ──────────────────────────
-        lines.append(SEP1)
-        lines.append(f"前日作業実績  {yesterday_str}")
-        lines.append(SEP1)
+        # ── yesterday's work log section ──────────────────────────
+        if include_prev:
+            lines.append(SEP1)
+            lines.append(f"Yesterday's Work Log  {yesterday_str}")
+            lines.append(SEP1)
 
-        # 前日ログを (event, process) キーで集計
-        prev_groups: dict[tuple, list] = {}
-        for task in self._tasks:
-            for lg in task.get("work_logs", []):
-                if not lg.get("end"):
-                    continue
-                try:
-                    dt_s = datetime.datetime.fromisoformat(lg["start"])
-                    dt_e = datetime.datetime.fromisoformat(lg["end"])
-                    if dt_s.date().isoformat() != yesterday_str:
+            # aggregate yesterday's logs by (event, process) key
+            prev_groups: dict[tuple, list] = {}
+            for task in self._tasks:
+                for lg in task.get("work_logs", []):
+                    if not lg.get("end"):
                         continue
-                    key = (task.get("event", ""), task.get("process", ""))
-                    prev_groups.setdefault(key, []).append((dt_s, dt_e))
-                except Exception:
-                    pass
+                    try:
+                        dt_s = datetime.datetime.fromisoformat(lg["start"])
+                        dt_e = datetime.datetime.fromisoformat(lg["end"])
+                        if dt_s.date().isoformat() != yesterday_str:
+                            continue
+                        key = (task.get("event", ""), task.get("process", ""))
+                        prev_groups.setdefault(key, []).append((dt_s, dt_e))
+                    except Exception:
+                        pass
 
-        if prev_groups:
-            day_total_sec = 0.0
-            # タスク名列の幅を最長に合わせる
-            label_width = max(
-                len(f"  [{ev}] {proc}") for (ev, proc) in prev_groups
-            )
-            for (ev, proc), entries in sorted(prev_groups.items()):
-                task_sec = sum((e - s).total_seconds() for s, e in entries)
-                day_total_sec += task_sec
-                h, m = divmod(int(task_sec) // 60, 60)
-                label = f"  [{ev}] {proc}".ljust(label_width)
-                lines.append(f"{label}  ({h}時間{m:02d}分)")
-                for s, e in sorted(entries):
-                    lines.append(f"    {s.strftime('%H:%M')} - {e.strftime('%H:%M')}")
-            dh, dm = divmod(int(day_total_sec) // 60, 60)
+            if prev_groups:
+                day_total_sec = 0.0
+                # align task name column to the longest entry
+                label_width = max(
+                    len(f"  [{ev}] {proc}") for (ev, proc) in prev_groups
+                )
+                for (ev, proc), entries in sorted(prev_groups.items()):
+                    task_sec = sum((e - s).total_seconds() for s, e in entries)
+                    day_total_sec += task_sec
+                    h, m = divmod(int(task_sec) // 60, 60)
+                    label = f"  [{ev}] {proc}".ljust(label_width)
+                    lines.append(f"{label}  ({h}h {m:02d}m)")
+                    for s, e in sorted(entries):
+                        lines.append(f"    {s.strftime('%H:%M')} - {e.strftime('%H:%M')}")
+                dh, dm = divmod(int(day_total_sec) // 60, 60)
+                lines.append("")
+                lines.append(f"  Total: {dh}h {dm:02d}m")
+            else:
+                lines.append("  (no records)")
+
             lines.append("")
-            lines.append(f"  合計: {dh}時間{dm:02d}分")
-        else:
-            lines.append("  （記録なし）")
-
-        lines.append("")
 
         for event_name, task_list in groups.items():
             lines.append("")
             ev_done = sum(1 for t in task_list if t.get("progress", 0) == 100)
-            lines.append(f"■ {event_name}  （{ev_done}/{len(task_list)} 完了）")
+            lines.append(f"■ {event_name}  ({ev_done}/{len(task_list)} completed)")
             lines.append(SEP2)
 
             for task in task_list:
                 pct      = task.get("progress", 0)
-                process  = task.get("process", "（プロセス名なし）")
+                process  = task.get("process", "(no process name)")
                 content  = task.get("content", "").strip()
                 deadline = task.get("deadline", "")
                 updated  = task.get("updated", "")
@@ -7222,9 +7862,8 @@ class FolderLauncher(tk.Tk):
                 if not memos and task.get("memo"):
                     memos = [{"title": "Memo", "content": task["memo"]}]
 
-                # 進捗バー（20文字幅）
-                bar_filled = int(pct / 5)
-                bar = "#" * bar_filled + "-" * (20 - bar_filled)
+                # progress bar (20 chars wide)
+                bar = _pbar(pct, 20)
 
                 lines.append(f"  {process}")
                 lines.append(f"    Progress : [{bar}] {pct}%")
@@ -7304,11 +7943,11 @@ class FolderLauncher(tk.Tk):
                             activebackground=C["btn_del_h"], **_lb_btn_cfg)
         del_btn.pack(side="left")
 
-        # ── 区切り線 ────────────────────────────────────────
+        # ── separator line ────────────────────────────────────────
         tk.Frame(win, bg=C["border"], width=1).pack(
             side="left", fill="y", padx=(8, 0))
 
-        # ── 右ペイン（編集エリア）───────────────────────────
+        # ── right pane (edit area) ───────────────────────────
         right = tk.Frame(win, bg=C["bg"])
         right.pack(side="left", fill="both", expand=True,
                    padx=(8, 10), pady=10)
@@ -7336,7 +7975,7 @@ class FolderLauncher(tk.Tk):
                   activebackground=C["accent_dk"],
                   activeforeground="white").pack(side="right")
 
-        # ── ロジック ────────────────────────────────────────
+        # ── logic ────────────────────────────────────────
         _sel = [-1]
 
         def _load(idx):
@@ -7424,8 +8063,8 @@ class FolderLauncher(tk.Tk):
     def _render_notify_list(self):
         now = datetime.datetime.now()
 
-        # Upcoming / Past に分類
-        # Past = 時刻が過去 かつ recurrence == "none"
+        # classify into Upcoming / Past
+        # Past = time is in the past AND recurrence == "none"
         upcoming: list[tuple[int, dict]] = []
         past:     list[tuple[int, dict]] = []
         for i, item in enumerate(self._notify_items):
@@ -7451,7 +8090,7 @@ class FolderLauncher(tk.Tk):
         for i, item in upcoming:
             self._make_notify_card(i, item, now, parent=self._list_frame)
 
-        # ── Past（折りたたみ可能）──
+        # ── Past (collapsible) ──
         if past:
             tk.Frame(self._list_frame, bg=C["border"], height=1).pack(
                 fill="x", padx=2, pady=(8, 0))
@@ -7624,19 +8263,19 @@ class FolderLauncher(tk.Tk):
         C.update(THEMES[theme_name])
         self._save_config()
 
-        # _tick() の after ループをキャンセル（二重ループ防止）
+        # cancel the _tick() after loop (prevent double loop)
         if self._tick_id is not None:
             self.after_cancel(self._tick_id)
             self._tick_id = None
 
-        # アイコンをテーマカラーで再生成
+        # regenerate icon with theme colors
         palette = ICON_PALETTES.get(theme_name)
         png_b64 = _make_icon_png(palette)
         self._icon = tk.PhotoImage(data=png_b64)
         self.wm_iconphoto(True, self._icon)
         _setup_taskbar_icon(self, palette)
 
-        # 全ウィジェットを破棄して再構築
+        # destroy all widgets and rebuild
         for w in self.winfo_children():
             w.destroy()
         self.configure(bg=C["bg"])
@@ -7653,7 +8292,7 @@ class FolderLauncher(tk.Tk):
         self._tick_id = self.after(1000, self._tick)
 
     def _update_banner(self):
-        """次の通知をバナーラベルに表示する。"""
+        """Display the next notification in the banner label."""
         if not hasattr(self, "_banner_lbl"):
             return
         if not self._banner_enabled.get():
@@ -7725,7 +8364,7 @@ class FolderLauncher(tk.Tk):
             subprocess.Popen(["explorer", os.path.normpath(path)])
 
     def _check_schedule(self):
-        """スケジュール通知を定期チェック（30秒ごと）"""
+        """Periodically check scheduled notifications (every 30 seconds)"""
         now = datetime.datetime.now()
         updated = False
         for i, item in enumerate(self._notify_items):
@@ -7753,7 +8392,7 @@ class FolderLauncher(tk.Tk):
                             os.startfile(op)
                     except Exception:
                         pass
-            # スケジュール時刻を過ぎたら、繰り返し設定に従い次回日時へ更新
+            # if past the scheduled time, update to the next datetime per recurrence setting
             if now >= sched:
                 self._notified.discard(key)
                 recurrence = item.get("recurrence", "none")
@@ -7766,7 +8405,7 @@ class FolderLauncher(tk.Tk):
                     item["scheduled_at"] = next_sched.strftime("%Y-%m-%d %H:%M")
                     updated = True
                 elif recurrence == "monthly":
-                    # 月末対応: 翌月の末日を超えないよう調整
+                    # month-end handling: cap day to the last day of next month
                     year, month = sched.year, sched.month
                     month += 1
                     if month > 12:
@@ -7797,8 +8436,8 @@ class LoginWindow(tk.Tk):
         self.resizable(False, False)
         self.authenticated = False
 
-        # Windows のネイティブ ttk テーマは Treeview 見出し等の背景色を無視するため
-        # clam テーマに切り替えてカスタムカラーを有効にする
+        # The native Windows ttk theme ignores background colors for Treeview headers etc.,
+        # so switch to the clam theme to enable custom colors.
         ttk.Style(self).theme_use("clam")
 
         self._icon = tk.PhotoImage(data=_make_icon_png())
@@ -7862,7 +8501,7 @@ class LoginWindow(tk.Tk):
             self._shake()
 
     def _shake(self, n: int = 8, d: int = 7):
-        """ウィンドウを左右に揺らすアニメーション。"""
+        """Animation that shakes the window left and right."""
         if n <= 0:
             return
         x, y = self.winfo_x(), self.winfo_y()
@@ -7887,7 +8526,7 @@ def _set_bg(frame: tk.Frame, color: str):
 
 
 def _preload_theme():
-    """起動前に config.json からテーマだけ読み込んで C を更新する。"""
+    """Load only the theme from config.json before startup and update C."""
     try:
         cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
         theme = cfg.get("theme", "violet")
