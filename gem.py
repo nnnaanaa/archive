@@ -14,7 +14,6 @@ import struct
 import base64
 import ctypes
 import datetime
-import hashlib
 import tempfile
 import threading
 import time
@@ -312,27 +311,27 @@ def _make_icon_png(palette: dict | None = None) -> str:
     F   = p["F"]
     MD  = p["MD"]
 
-    # ── ベル（頭部）: 真円 center=(15,12) r=10 ──────────────────
+    # ── ベル（頭部）: 真円 center=(15,16) r=10 （4px 下にずらし）──
     BELL = {
-         3: (11, 19),
-         4: ( 9, 21),
-         5: ( 8, 22),
-         6: ( 7, 23),
-         7: ( 6, 24),
-         8: ( 6, 24),
-         9: ( 5, 25),
-        10: ( 5, 25),
-        11: ( 5, 25),
-        12: ( 5, 25),
+         7: (11, 19),
+         8: ( 9, 21),
+         9: ( 8, 22),
+        10: ( 7, 23),
+        11: ( 6, 24),
+        12: ( 6, 24),
         13: ( 5, 25),
         14: ( 5, 25),
         15: ( 5, 25),
-        16: ( 6, 24),
-        17: ( 6, 24),
-        18: ( 7, 23),
-        19: ( 8, 22),
-        20: ( 9, 21),
-        21: (11, 19),
+        16: ( 5, 25),
+        17: ( 5, 25),
+        18: ( 5, 25),
+        19: ( 5, 25),
+        20: ( 6, 24),
+        21: ( 6, 24),
+        22: ( 7, 23),
+        23: ( 8, 22),
+        24: ( 9, 21),
+        25: (11, 19),
     }
 
     def _in_d(d, x, y):
@@ -344,11 +343,11 @@ def _make_icon_png(palette: dict | None = None) -> str:
         if not in_bell(x, y): return False
         return any(not in_bell(x+dx, y+dy) for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)))
 
-    # ── 耳（幅広の丸耳） ────────────────────────────────────────
-    L_EAR    = {0: ( 8,12), 1: ( 7,13), 2: ( 7,13), 3: ( 7,13), 4: ( 8,12)}
-    R_EAR    = {0: (18,22), 1: (17,23), 2: (17,23), 3: (17,23), 4: (18,22)}
-    L_EAR_IN = {0: ( 9,11), 1: ( 8,12), 2: ( 8,12), 3: ( 8,12)}
-    R_EAR_IN = {0: (19,21), 1: (18,22), 2: (18,22), 3: (18,22)}
+    # ── 耳（幅広の丸耳、2px 下にずらし） ───────────────────────
+    L_EAR    = {4: ( 8,12), 5: ( 7,13), 6: ( 7,13), 7: ( 7,13), 8: ( 8,12)}
+    R_EAR    = {4: (18,22), 5: (17,23), 6: (17,23), 7: (17,23), 8: (18,22)}
+    L_EAR_IN = {4: ( 9,11), 5: ( 8,12), 6: ( 8,12), 7: ( 8,12)}
+    R_EAR_IN = {4: (19,21), 5: (18,22), 6: (18,22), 7: (18,22)}
 
     def in_ear(x, y):    return _in_d(L_EAR, x, y) or _in_d(R_EAR, x, y)
     def ear_inner(x, y): return _in_d(L_EAR_IN, x, y) or _in_d(R_EAR_IN, x, y)
@@ -362,7 +361,7 @@ def _make_icon_png(palette: dict | None = None) -> str:
     TENTACLE_EDGE: set[tuple[int, int]] = set()
     for base_x, drift in ((7, -1), (12, 0), (17, 0), (22, 1)):
         for dy in range(5):
-            y = 22 + dy
+            y = 26 + dy
             if y >= H: break
             x = base_x + drift * (dy // 3)
             TENTACLE.add((x, y))
@@ -388,9 +387,9 @@ def _make_icon_png(palette: dict | None = None) -> str:
         # ベル（淡い立体感: 上部中央〜左にハイライト、下部に軽いシャドウ）
         if is_bell_edge(x, y): return BDR
         dx = x - 15
-        if y <= 12 and dx <= 1:
+        if y <= 16 and dx <= 1:
             return LT
-        if y >= 18:
+        if y >= 22:
             return MD
         return F
 
@@ -3060,7 +3059,6 @@ class FolderLauncher(tk.Tk):
         ("auto",      "Auto",      -9),
         ("terminal",  "Terminal",  -1),
         ("tasks",     "Tasks",     -2),
-        ("pomodoro",  "Pomodoro", -10),
         ("notify",    "Notify",    -3),
         ("web",       "Web",       -4),
         ("clip",      "Clip",      -5),
@@ -3104,8 +3102,6 @@ class FolderLauncher(tk.Tk):
         self._memos: list[dict] = []   # {"title": str, "body": str}
         self._memo_sel: int | None = None
         self._work_active: dict | None = None  # {"task_idx": int, "start": datetime}
-        self._sleep_win: tk.Toplevel | None = None
-        self._sleep_tick_id = None
         self._tray_icon: pystray.Icon | None = None
         self._work_anim_id = None
         self._work_anim_dots = 0
@@ -3133,21 +3129,6 @@ class FolderLauncher(tk.Tk):
         self._conn_ping_dots:    dict[str, list]        = {}  # host -> [Canvas, ...]
         self._conn_ping_running: set[str]               = set()   # after IDs for dashboard auto-refresh
         self._conn_ping_enabled: bool = True   # Terminal ping dot ON/OFF
-        # Pomodoro
-        self._pomo_state: str = "idle"   # idle/work/break/long_break/paused
-        self._pomo_paused_state: str = "work"  # state before pause
-        self._pomo_remaining: int = 25 * 60   # remaining seconds
-        self._pomo_cycle: int = 0             # completed pomodoro count
-        self._pomo_session: int = 0           # total session count
-        self._pomo_after_id = None            # after() ID
-        self._pomo_work_min: int = 25
-        self._pomo_break_min: int = 5
-        self._pomo_long_break_min: int = 15
-        self._pomo_task_idx: int | None = None  # index of linked task
-        self._pomo_lbl_time: tk.Label | None = None
-        self._pomo_lbl_state: tk.Label | None = None
-        self._pomo_lbl_cycle: tk.Label | None = None
-        self._pomo_canvas: tk.Canvas | None = None
         self._load_config()
 
         # generate icon after theme is resolved
@@ -3316,6 +3297,7 @@ class FolderLauncher(tk.Tk):
             "memos":         self._memos,
             "pinned_tabs":   self._pinned_tabs,
             "rules":         self._rules,
+            "active_work":   self._active_work_record(),
         }
         CONFIG_FILE.write_text(
             json.dumps(cfg, ensure_ascii=False, indent=2),
@@ -3511,18 +3493,6 @@ class FolderLauncher(tk.Tk):
         tk.Button(hdr, text="Screenshot", command=self._open_screenshot,
                   **_btn_cfg).pack(side="right", padx=(0, 2))
 
-        # Sleep ▾
-        def _sleep_menu(e=None):
-            m = tk.Menu(self, tearoff=0,
-                        bg=C["card"], fg=C["text"],
-                        activebackground=C["card_h"], activeforeground=C["text"],
-                        relief="flat", font=FONT_SMALL)
-            m.add_command(label="Window",      command=lambda: self._open_sleep_screen(False))
-            m.add_command(label="Full Screen", command=lambda: self._open_sleep_screen(True))
-            m.tk_popup(e.x_root, e.y_root)
-        _sleep_btn = tk.Button(hdr, text="Sleep", **_btn_cfg)
-        _sleep_btn.pack(side="right", padx=(0, 2))
-        _sleep_btn.bind("<Button-1>", _sleep_menu)
 
         # Minimize to tray
         self.bind("<Unmap>", self._on_unmap)
@@ -3753,12 +3723,6 @@ class FolderLauncher(tk.Tk):
         # Start file watcher when entering the Auto tab
         if idx == -9:
             self._ensure_file_watcher()
-        # reset display labels when leaving Pomodoro tab (timer keeps running)
-        if idx != -10:
-            self._pomo_lbl_time = None
-            self._pomo_lbl_state = None
-            self._pomo_lbl_cycle = None
-            self._pomo_canvas = None
 
     def _update_footer(self):
         """Update footer button text/command based on active tab."""
@@ -3789,9 +3753,6 @@ class FolderLauncher(tk.Tk):
             self._footer_btn2.pack_forget()
         elif self._active == -9:
             self._footer_btn.configure(text="+ Add Rule", command=self._add_rule)
-            self._footer_btn2.pack_forget()
-        elif self._active == -10:
-            self._footer_btn.configure(text="Settings", command=self._pomo_open_settings)
             self._footer_btn2.pack_forget()
         elif self._active == -12:
             self._footer_btn.configure(text="Search", command=lambda: None)
@@ -3970,8 +3931,6 @@ class FolderLauncher(tk.Tk):
             self._render_memo_list()
         elif self._active == -9:
             self._render_rules_list()
-        elif self._active == -10:
-            self._render_pomodoro()
         elif self._active == -12:
             self._render_grep_list()
         else:
@@ -5983,313 +5942,6 @@ class FolderLauncher(tk.Tk):
         query_e.bind("<Return>", lambda e: _start_search())
         query_e.focus_set()
 
-    # ── Pomodoro ───────────────────────────────────────────
-
-    def _render_pomodoro(self):
-        """Render the Pomodoro tab."""
-        f = self._list_frame
-        _dark = self._theme in ("dark", "claude", "scarlet", "ocean")
-
-        state_text = {
-            "idle": "Ready", "work": "Work", "break": "Break",
-            "long_break": "Long Break", "paused": "Paused",
-        }
-        state_colors = {
-            "idle":       C["text_sub"],
-            "work":       C["accent"],
-            "break":      "#4CAF50" if not _dark else "#80DDA0",
-            "long_break": "#2196F3" if not _dark else "#80C8FF",
-            "paused":     C["text_sub"],
-        }
-
-        # ── timer card ──
-        card = tk.Frame(f, bg=C["card"],
-                        highlightthickness=1, highlightbackground=C["border"])
-        card.pack(fill="x", padx=6, pady=(6, 3))
-
-        # row 1: [state]  [MM:SS]  [cycle]
-        row1 = tk.Frame(card, bg=C["card"])
-        row1.pack(fill="x", padx=10, pady=(6, 2))
-
-        self._pomo_lbl_state = tk.Label(
-            row1,
-            text=state_text.get(self._pomo_state, "Ready"),
-            bg=C["card"], fg=state_colors.get(self._pomo_state, C["text_sub"]),
-            font=FONT_SMALL, width=9, anchor="w",
-        )
-        self._pomo_lbl_state.pack(side="left")
-
-        mins, secs = divmod(self._pomo_remaining, 60)
-        self._pomo_lbl_time = tk.Label(
-            row1, text=f"{mins:02d}:{secs:02d}",
-            bg=C["card"], fg=C["text"],
-            font=("Segoe UI", 18, "bold"),
-        )
-        self._pomo_lbl_time.pack(side="left", padx=(4, 4))
-
-        self._pomo_lbl_cycle = tk.Label(
-            row1, text=self._pomo_cycle_text(),
-            bg=C["card"], fg=C["text_sub"],
-            font=FONT_SMALL,
-        )
-        self._pomo_lbl_cycle.pack(side="left")
-
-        # row 2: progress bar (thin horizontal bar)
-        self._pomo_canvas = tk.Canvas(card, height=6, bg=C["border"],
-                                      highlightthickness=0)
-        self._pomo_canvas.pack(fill="x", padx=10, pady=(2, 6))
-        self._pomo_draw_arc()
-
-        # ── button row ──
-        btn_row = tk.Frame(f, bg=C["bg"])
-        btn_row.pack(fill="x", padx=6, pady=(0, 3))
-
-        if self._pomo_state in ("idle", "paused"):
-            tk.Button(btn_row, text="Start",
-                      command=self._pomo_start,
-                      bg=C["accent"], fg="white", relief="flat", bd=0,
-                      font=FONT_BOLD, cursor="hand2", pady=4,
-                      activebackground=C["accent_dk"], activeforeground="white",
-                      ).pack(side="left", fill="x", expand=True, padx=(0, 2))
-        else:
-            tk.Button(btn_row, text="Pause",
-                      command=self._pomo_pause,
-                      bg=C["accent_lt"], fg=C["accent_dk"], relief="flat", bd=0,
-                      font=FONT_BOLD, cursor="hand2", pady=4,
-                      activebackground=C["border"], activeforeground=C["accent_dk"],
-                      ).pack(side="left", fill="x", expand=True, padx=(0, 2))
-
-        tk.Button(btn_row, text="Reset",
-                  command=self._pomo_reset,
-                  bg=C["card"], fg=C["text_sub"], relief="flat", bd=0,
-                  font=FONT, cursor="hand2", pady=4,
-                  activebackground=C["card_h"], activeforeground=C["text"],
-                  ).pack(side="left", fill="x", expand=True)
-
-        # ── linked task ──
-        task_row = tk.Frame(f, bg=C["bg"])
-        task_row.pack(fill="x", padx=6, pady=(0, 3))
-
-        tk.Label(task_row, text="Task:",
-                 bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL).pack(side="left")
-
-        task_names = ["(none)"] + [
-            f"[{t['event']}] {t.get('process','')}" for t in self._tasks
-        ]
-        task_var = tk.StringVar()
-        if self._pomo_task_idx is not None and self._pomo_task_idx < len(self._tasks):
-            t = self._tasks[self._pomo_task_idx]
-            task_var.set(f"[{t['event']}] {t.get('process','')}")
-        else:
-            task_var.set("(none)")
-
-        om = tk.OptionMenu(task_row, task_var, *task_names)
-        om.configure(bg=C["card"], fg=C["text"], relief="flat",
-                     font=FONT_SMALL, cursor="hand2",
-                     activebackground=C["card_h"], activeforeground=C["text"],
-                     highlightthickness=0)
-        om["menu"].configure(bg=C["card"], fg=C["text"],
-                             activebackground=C["card_h"],
-                             activeforeground=C["text"], font=FONT_SMALL)
-        om.pack(side="left", padx=(4, 0), fill="x", expand=True)
-
-        def _on_task_select(*_):
-            val = task_var.get()
-            if val == "(none)":
-                self._pomo_task_idx = None
-            else:
-                for i, t in enumerate(self._tasks):
-                    if f"[{t['event']}] {t.get('process','')}" == val:
-                        self._pomo_task_idx = i
-                        break
-        task_var.trace_add("write", _on_task_select)
-
-        # ── statistics ──
-        tk.Label(f,
-                 text=f"Sessions: {self._pomo_session}   "
-                      f"{self._pomo_work_min}m / {self._pomo_break_min}m / {self._pomo_long_break_min}m",
-                 bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL,
-                 ).pack(anchor="w", padx=8, pady=(0, 4))
-
-    def _pomo_cycle_text(self) -> str:
-        dots = ""
-        for i in range(4):
-            dots += "* " if i < (self._pomo_cycle % 4) else "- "
-        return dots.strip()
-
-    def _pomo_draw_arc(self):
-        """Draw the circular progress bar."""
-        c = self._pomo_canvas
-        if c is None:
-            return
-        c.update_idletasks()
-        w = c.winfo_width()
-        if w <= 1:
-            w = 260
-        c.delete("all")
-        _dark = self._theme in ("dark", "claude", "scarlet", "ocean")
-
-        total = self._pomo_total_seconds()
-        ratio = max(0.0, min(1.0, self._pomo_remaining / total)) if total > 0 else 1.0
-
-        arc_colors = {
-            "work":       C["accent"],
-            "break":      "#4CAF50" if not _dark else "#80DDA0",
-            "long_break": "#2196F3" if not _dark else "#80C8FF",
-        }
-        bar_color = arc_colors.get(self._pomo_state, C["accent_lt"])
-
-        fill_w = int(w * ratio)
-        if fill_w > 0:
-            c.create_rectangle(0, 0, fill_w, 6, fill=bar_color, outline="")
-
-    def _pomo_total_seconds(self) -> int:
-        state = self._pomo_state
-        if state == "paused":
-            state = self._pomo_paused_state
-        if state == "work":
-            return self._pomo_work_min * 60
-        elif state == "long_break":
-            return self._pomo_long_break_min * 60
-        else:
-            return self._pomo_break_min * 60
-
-    def _pomo_start(self):
-        if self._pomo_state == "idle":
-            self._pomo_remaining = self._pomo_work_min * 60
-            self._pomo_state = "work"
-        elif self._pomo_state == "paused":
-            self._pomo_state = self._pomo_paused_state
-        self._pomo_tick()
-        self._render_list()
-
-    def _pomo_pause(self):
-        if self._pomo_state in ("work", "break", "long_break"):
-            self._pomo_paused_state = self._pomo_state
-            self._pomo_state = "paused"
-            if self._pomo_after_id:
-                self.after_cancel(self._pomo_after_id)
-                self._pomo_after_id = None
-        self._render_list()
-
-    def _pomo_reset(self):
-        if self._pomo_after_id:
-            self.after_cancel(self._pomo_after_id)
-            self._pomo_after_id = None
-        self._pomo_state = "idle"
-        self._pomo_remaining = self._pomo_work_min * 60
-        self._render_list()
-
-    def _pomo_tick(self):
-        if self._pomo_state not in ("work", "break", "long_break"):
-            return
-        self._pomo_remaining -= 1
-
-        # update labels (only when tab is shown)
-        if self._pomo_lbl_time is not None:
-            mins, secs = divmod(self._pomo_remaining, 60)
-            try:
-                self._pomo_lbl_time.configure(text=f"{mins:02d}:{secs:02d}")
-            except tk.TclError:
-                self._pomo_lbl_time = None
-        if self._pomo_canvas is not None:
-            try:
-                self._pomo_draw_arc()
-            except tk.TclError:
-                self._pomo_canvas = None
-
-        if self._pomo_remaining <= 0:
-            self._pomo_on_complete()
-            return
-
-        self._pomo_after_id = self.after(1000, self._pomo_tick)
-
-    def _pomo_on_complete(self):
-        self.bell()
-        if self._pomo_state == "work":
-            self._pomo_session += 1
-            self._pomo_cycle += 1
-            # record work log to linked task
-            if self._pomo_task_idx is not None and self._pomo_task_idx < len(self._tasks):
-                task = self._tasks[self._pomo_task_idx]
-                now = datetime.datetime.now()
-                start = now - datetime.timedelta(minutes=self._pomo_work_min)
-                task.setdefault("work_logs", []).append({
-                    "start": start.isoformat(timespec="seconds"),
-                    "end":   now.isoformat(timespec="seconds"),
-                    "note":  "Pomodoro",
-                })
-                self._save_config()
-            # long break after every 4 cycles
-            if self._pomo_cycle % 4 == 0:
-                self._pomo_state = "long_break"
-                self._pomo_remaining = self._pomo_long_break_min * 60
-            else:
-                self._pomo_state = "break"
-                self._pomo_remaining = self._pomo_break_min * 60
-        else:
-            self._pomo_state = "work"
-            self._pomo_remaining = self._pomo_work_min * 60
-
-        if self._active == -10:
-            self._render_list()
-        else:
-            # auto-start even in the background
-            self._pomo_after_id = self.after(1000, self._pomo_tick)
-
-    def _pomo_open_settings(self):
-        dlg = tk.Toplevel(self)
-        dlg.title("Pomodoro Settings")
-        dlg.configure(bg=C["bg"])
-        dlg.resizable(False, False)
-        dlg.transient(self)
-        dlg.grab_set()
-
-        def _row(label, default):
-            row = tk.Frame(dlg, bg=C["bg"])
-            row.pack(fill="x", padx=16, pady=4)
-            tk.Label(row, text=label, bg=C["bg"], fg=C["text"],
-                     font=FONT, width=14, anchor="w").pack(side="left")
-            var = tk.StringVar(value=str(default))
-            tk.Entry(row, textvariable=var, bg=C["card"], fg=C["text"],
-                     insertbackground=C["text"], relief="flat",
-                     font=FONT, width=6).pack(side="left", padx=(4, 0))
-            return var
-
-        tk.Label(dlg, text="Pomodoro Settings", bg=C["bg"], fg=C["text"],
-                 font=FONT_BOLD, pady=10).pack()
-
-        v_work  = _row("Work (min):",       self._pomo_work_min)
-        v_break = _row("Break (min):",      self._pomo_break_min)
-        v_long  = _row("Long break (min):", self._pomo_long_break_min)
-
-        def _save():
-            try:
-                self._pomo_work_min       = max(1, int(v_work.get()))
-                self._pomo_break_min      = max(1, int(v_break.get()))
-                self._pomo_long_break_min = max(1, int(v_long.get()))
-            except ValueError:
-                pass
-            if self._pomo_state == "idle":
-                self._pomo_remaining = self._pomo_work_min * 60
-            dlg.destroy()
-            self._render_list()
-
-        btn_row = tk.Frame(dlg, bg=C["bg"])
-        btn_row.pack(pady=(8, 12))
-        tk.Button(btn_row, text="Save",
-                  command=_save,
-                  bg=C["accent"], fg="white", relief="flat", bd=0,
-                  font=FONT_BOLD, cursor="hand2", padx=20, pady=6,
-                  activebackground=C["accent_dk"], activeforeground="white",
-                  ).pack(side="left", padx=4)
-        tk.Button(btn_row, text="Cancel",
-                  command=dlg.destroy,
-                  bg=C["card"], fg=C["text_sub"], relief="flat", bd=0,
-                  font=FONT, cursor="hand2", padx=12, pady=6,
-                  activebackground=C["card_h"], activeforeground=C["text"],
-                  ).pack(side="left", padx=4)
-
     # ── Task list ─────────────────────────────────────────
 
     def _render_kanban(self):
@@ -7236,6 +6888,17 @@ class FolderLauncher(tk.Tk):
         )
         self._work_anim_id = self.after(500, self._work_anim_step)
 
+    def _active_work_record(self) -> dict | None:
+        """現在の作業中タスク情報を config 保存用の dict として返す。"""
+        if self._work_active is None:
+            return None
+        task = self._tasks[self._work_active["task_idx"]]
+        return {
+            "event":   task.get("event", ""),
+            "process": task.get("process", ""),
+            "start":   self._work_active["start"].isoformat(timespec="seconds"),
+        }
+
     def _start_work(self, task_idx: int):
         """Start work: record the current time."""
         if self._work_active is not None:
@@ -7250,6 +6913,7 @@ class FolderLauncher(tk.Tk):
             "task_idx": task_idx,
             "start": datetime.datetime.now(),
         }
+        self._save_config()
         self._render_list()
 
     def _stop_work(self, task_idx: int):
@@ -7264,7 +6928,7 @@ class FolderLauncher(tk.Tk):
             "start": start_dt.isoformat(timespec="seconds"),
             "end":   end_dt.isoformat(timespec="seconds"),
         })
-        self._save_tasks()
+        self._save_config()  # active_work を None にして保存
         self._render_list()
 
     # ── System tray ───────────────────────────────────────
@@ -7474,103 +7138,6 @@ class FolderLauncher(tk.Tk):
             self._tray_icon = None
         self.destroy()
 
-    def _open_sleep_screen(self, fullscreen: bool = False):
-        """Sleep overlay showing clock and active task."""
-        if self._sleep_win and self._sleep_win.winfo_exists():
-            return
-
-        BG      = C["card"]
-        FG      = C["text"]
-        ACCENT  = C["accent"]
-        DIM     = C["text_sub"]
-        BORDER  = C["border"]
-
-        win = tk.Toplevel(self)
-        win.overrideredirect(True)
-        win.attributes("-topmost", True)
-        win.configure(bg=BG)
-
-        if fullscreen:
-            sw = win.winfo_screenwidth()
-            sh = win.winfo_screenheight()
-            win.geometry(f"{sw}x{sh}+0+0")
-            clock_size, date_size, task_size, elapsed_size, hint_size = 80, 16, 18, 13, 9
-        else:
-            self.update_idletasks()
-            wx = self.winfo_rootx()
-            wy = self.winfo_rooty()
-            ww = self.winfo_width()
-            wh = self.winfo_height()
-            win.geometry(f"{ww}x{wh}+{wx}+{wy}")
-
-        _follow_bid = [None]
-        if not fullscreen:
-            def _follow(e=None):
-                if not win.winfo_exists():
-                    return
-                win.geometry(f"{self.winfo_width()}x{self.winfo_height()}"
-                             f"+{self.winfo_rootx()}+{self.winfo_rooty()}")
-            _follow_bid[0] = self.bind("<Configure>", _follow)
-            clock_size, date_size, task_size, elapsed_size, hint_size = 48, 12, 14, 11, 8
-
-        self._sleep_win = win
-
-        tk.Frame(win, bg=BORDER, height=2).place(relx=0, rely=0, relwidth=1)
-
-        clock_lbl = tk.Label(win, text="", bg=BG, fg=FG,
-                             font=("Segoe UI", clock_size, "bold"))
-        clock_lbl.place(relx=0.5, rely=0.38, anchor="center")
-
-        date_lbl = tk.Label(win, text="", bg=BG, fg=DIM,
-                            font=("Segoe UI", date_size))
-        date_lbl.place(relx=0.5, rely=0.54, anchor="center")
-
-        task_lbl = tk.Label(win, text="", bg=BG, fg=ACCENT,
-                            font=("Segoe UI", task_size, "bold"))
-        task_lbl.place(relx=0.5, rely=0.65, anchor="center")
-
-        elapsed_lbl = tk.Label(win, text="", bg=BG, fg=DIM,
-                               font=("Segoe UI", elapsed_size))
-        elapsed_lbl.place(relx=0.5, rely=0.74, anchor="center")
-
-        hint_lbl = tk.Label(win, text="Click or press any key to wake",
-                            bg=BG, fg=DIM, font=("Segoe UI", hint_size))
-        hint_lbl.place(relx=0.5, rely=0.93, anchor="center")
-
-        def _wake(e=None):
-            if self._sleep_tick_id:
-                self.after_cancel(self._sleep_tick_id)
-                self._sleep_tick_id = None
-            if _follow_bid[0] is not None:
-                try:
-                    self.unbind("<Configure>", _follow_bid[0])
-                except Exception:
-                    pass
-            win.destroy()
-            self._sleep_win = None
-
-        def _tick_sleep():
-            if not win.winfo_exists():
-                return
-            now = datetime.datetime.now()
-            clock_lbl.configure(text=now.strftime("%H:%M"))
-            date_lbl.configure(text=now.strftime("%Y-%m-%d  %A"))
-            if self._work_active is not None:
-                wa      = self._work_active
-                task    = self._tasks[wa["task_idx"]]
-                name    = task.get("process", "Task")
-                elapsed = (now - wa["start"]).total_seconds()
-                task_lbl.configure(text=f"Working on:  {name}")
-                elapsed_lbl.configure(text=_fmt_duration(elapsed))
-            else:
-                task_lbl.configure(text="")
-                elapsed_lbl.configure(text="")
-            self._sleep_tick_id = self.after(1000, _tick_sleep)
-
-        win.bind("<Button-1>", _wake)
-        win.bind("<Key>",      _wake)
-        win.focus_set()
-        _tick_sleep()
 
     def _open_work_log(self, task_idx: int):
         """Open the work log list and delete dialog."""
@@ -8423,92 +7990,6 @@ class FolderLauncher(tk.Tk):
         self.after(30000, self._check_schedule)
 
 
-# ── Login window ──────────────────────────────────────────
-
-class LoginWindow(tk.Tk):
-    _USER = "admin"
-    _HASH = hashlib.sha256(b"nanahira").hexdigest()
-
-    def __init__(self):
-        super().__init__()
-        self.title("Gem")
-        self.configure(bg=C["bg"])
-        self.resizable(False, False)
-        self.authenticated = False
-
-        # The native Windows ttk theme ignores background colors for Treeview headers etc.,
-        # so switch to the clam theme to enable custom colors.
-        ttk.Style(self).theme_use("clam")
-
-        self._icon = tk.PhotoImage(data=_make_icon_png())
-        _setup_taskbar_icon(self)
-
-        self._build()
-
-        self.update_idletasks()
-        w  = self.winfo_width()
-        h  = self.winfo_height()
-        sw = self.winfo_screenwidth()
-        sh = self.winfo_screenheight()
-        self.geometry(f"+{(sw - w) // 2}+{(sh - h) // 2}")
-
-    def _build(self):
-        inner = tk.Frame(self, bg=C["bg"])
-        inner.pack(fill="x", padx=24, pady=(24, 8))
-
-        def _field(label_text, var, show=None):
-            tk.Label(inner, text=label_text, bg=C["bg"], fg=C["text_sub"],
-                     font=FONT_SMALL, anchor="w").pack(fill="x")
-            kw = {"show": show} if show else {}
-            e = tk.Entry(inner, textvariable=var, font=FONT,
-                         bg=C["card"], fg=C["text"], relief="flat", bd=1,
-                         insertbackground=C["accent"], width=22, **kw)
-            e.pack(fill="x", pady=(2, 10), ipady=4)
-            return e
-
-        self._user_var = tk.StringVar()
-        user_e = _field("Username", self._user_var)
-        user_e.focus_set()
-
-        self._pw_var = tk.StringVar()
-        pw_e = _field("Password", self._pw_var, show="*")
-        pw_e.bind("<Return>", lambda e: self._login())
-
-        self._err_var = tk.StringVar()
-        tk.Label(self, textvariable=self._err_var,
-                 bg=C["bg"], fg="#B84060",
-                 font=FONT_SMALL).pack()
-
-        btn = tk.Button(self, text="Login", command=self._login,
-                        bg=C["accent"], fg="white", relief="flat", bd=0,
-                        font=FONT_BOLD, cursor="hand2",
-                        padx=28, pady=6,
-                        activebackground=C["accent_dk"], activeforeground="white")
-        btn.pack(pady=(8, 20))
-        btn.bind("<Enter>", lambda e: btn.configure(bg=C["accent_dk"]))
-        btn.bind("<Leave>", lambda e: btn.configure(bg=C["accent"]))
-
-    def _login(self):
-        user = self._user_var.get().strip()
-        pw   = self._pw_var.get()
-        if (user == self._USER and
-                hashlib.sha256(pw.encode()).hexdigest() == self._HASH):
-            self.authenticated = True
-            self.destroy()
-        else:
-            self._err_var.set("Invalid username or password")
-            self._pw_var.set("")
-            self._shake()
-
-    def _shake(self, n: int = 8, d: int = 7):
-        """Animation that shakes the window left and right."""
-        if n <= 0:
-            return
-        x, y = self.winfo_x(), self.winfo_y()
-        offset = d if n % 2 == 0 else -d
-        self.geometry(f"+{x + offset}+{y}")
-        self.after(35, lambda: self._shake(n - 1, d))
-
 
 # ── Utilities ─────────────────────────────────────────────
 
@@ -8538,8 +8019,5 @@ def _preload_theme():
 
 if __name__ == "__main__":
     _preload_theme()
-    login = LoginWindow()
-    login.mainloop()
-    if login.authenticated:
-        app = FolderLauncher()
-        app.mainloop()
+    app = FolderLauncher()
+    app.mainloop()
