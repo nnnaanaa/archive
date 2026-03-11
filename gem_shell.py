@@ -12,6 +12,7 @@ import os
 import subprocess
 import sys
 import tempfile
+import unicodedata
 from pathlib import Path
 
 # Enable ANSI escape codes on Windows
@@ -69,6 +70,105 @@ WARN     = "\033[38;2;200;160;80m"    # amber
 ERR      = "\033[38;2;200;80;80m"     # red
 CAT_CLR  = "\033[38;2;196;184;232m"   # category header
 FILE_CLR = "\033[38;2;100;190;150m"   # file type tag
+
+# ── テーマ定義（gem.py と共通のパレット） ─────────────────────
+
+def _h(hex_color: str) -> str:
+    """Hex カラー (#RRGGBB) を ANSI 前景色エスケープに変換する。"""
+    c = hex_color.lstrip("#")
+    r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
+    return f"\033[38;2;{r};{g};{b}m"
+
+# gem.py の THEMES パレットをそのまま取り込む
+_GEM_PALETTES: dict[str, dict[str, str]] = {
+    "violet": {
+        "accent": "#8B7CC8", "accent_dk": "#6A5BAA", "accent_lt": "#C4B8E8",
+        "text_sub": "#7B6DB0",
+    },
+    "dark": {
+        "accent": "#7C6FBD", "accent_dk": "#5A4FA0", "accent_lt": "#9A8ED4",
+        "text_sub": "#A09CC0",
+    },
+    "light": {
+        "accent": "#6655BB", "accent_dk": "#4A3DA0", "accent_lt": "#A89DD4",
+        "text_sub": "#666699",
+    },
+    "gemini": {
+        "accent": "#1B6EF3", "accent_dk": "#1251B5", "accent_lt": "#A8C7FA",
+        "text_sub": "#5F6368",
+    },
+    "claude": {
+        "accent": "#DA7756", "accent_dk": "#B85C3C", "accent_lt": "#E89A7A",
+        "text_sub": "#9E9890",
+    },
+    "scarlet": {
+        "accent": "#CC2244", "accent_dk": "#991833", "accent_lt": "#E06078",
+        "text_sub": "#C09098",
+    },
+    "ocean": {
+        "accent": "#2196C4", "accent_dk": "#1570A0", "accent_lt": "#5BB8D4",
+        "text_sub": "#7AAFC8",
+    },
+    "rose": {
+        "accent": "#E0608A", "accent_dk": "#C0407A", "accent_lt": "#F0A0BC",
+        "text_sub": "#A06080",
+    },
+    "mint": {
+        "accent": "#3DAA78", "accent_dk": "#2A8A60", "accent_lt": "#80CCA8",
+        "text_sub": "#5A8A70",
+    },
+    "peach": {
+        "accent": "#E8845A", "accent_dk": "#C86030", "accent_lt": "#F5C0A0",
+        "text_sub": "#A06848",
+    },
+    "sky": {
+        "accent": "#4DA8DA", "accent_dk": "#2A88BE", "accent_lt": "#9DD4F0",
+        "text_sub": "#4A80A8",
+    },
+    "lemon": {
+        "accent": "#C8A800", "accent_dk": "#A08800", "accent_lt": "#E8D870",
+        "text_sub": "#787040",
+    },
+    "lavender": {
+        "accent": "#9B88D8", "accent_dk": "#7A66C0", "accent_lt": "#C8BCEE",
+        "text_sub": "#7868B0",
+    },
+    "sakura": {
+        "accent": "#E87898", "accent_dk": "#C85878", "accent_lt": "#F5B0C8",
+        "text_sub": "#A06888",
+    },
+    "plush": {
+        "accent": "#9E92D6", "accent_dk": "#7C6FBF", "accent_lt": "#C6BEE8",
+        "text_sub": "#6E65A5",
+    },
+}
+
+THEMES: dict[str, dict[str, str]] = {
+    name: {
+        "ACCENT":   _h(p["accent"]),
+        "ACCENT2":  _h(p["accent_dk"]),
+        "HL":       _h(p["accent_lt"]),
+        "TEXT_SUB": _h(p["text_sub"]),
+        "CAT_CLR":  _h(p["accent_lt"]),
+        "FILE_CLR": _h(p["accent_lt"]),
+    }
+    for name, p in _GEM_PALETTES.items()
+}
+
+
+def _apply_theme(name: str) -> bool:
+    """グローバルカラー変数を指定テーマで上書きする。"""
+    global ACCENT, ACCENT2, HL, TEXT_SUB, CAT_CLR, FILE_CLR
+    t = THEMES.get(name)
+    if not t:
+        return False
+    ACCENT   = t["ACCENT"]
+    ACCENT2  = t["ACCENT2"]
+    HL       = t["HL"]
+    TEXT_SUB = t["TEXT_SUB"]
+    CAT_CLR  = t["CAT_CLR"]
+    FILE_CLR = t["FILE_CLR"]
+    return True
 
 
 # ── Terminal helpers ───────────────────────────────────────────
@@ -238,9 +338,35 @@ def _type_tag(path: str) -> str:
         return f"{ERR}[miss]{R}"
 
 
+def _wcswidth(s: str) -> int:
+    """文字列の端末表示幅を返す（全角=2, 半角=1）。"""
+    w = 0
+    for c in s:
+        ew = unicodedata.east_asian_width(c)
+        w += 2 if ew in ("W", "F") else 1
+    return w
+
+
+def _trunc_path(path: str, max_cols: int) -> str:
+    """パスの表示幅が max_cols を超える場合、末尾を '...' で省略する。"""
+    if _wcswidth(path) <= max_cols:
+        return path
+    result = ""
+    used = 0
+    ellipsis_w = 3  # "..." の幅
+    budget = max_cols - ellipsis_w
+    for c in path:
+        cw = 2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
+        if used + cw > budget:
+            break
+        result += c
+        used += cw
+    return result + "..."
+
+
 def _open_path(path: str) -> bool:
     if os.path.isdir(path):
-        subprocess.Popen(["explorer", os.path.normpath(path)])
+        os.startfile(os.path.normpath(path))
         print(f"  {SUCCESS}opened folder:{R} {path}")
         return True
     elif os.path.isfile(path):
@@ -252,17 +378,74 @@ def _open_path(path: str) -> bool:
         return False
 
 
+def _getch_nav() -> str:
+    """単一キー入力を受け取り 'up' / 'down' / 'enter' / 'back' / 'quit' / 'menu' を返す。"""
+    try:
+        import msvcrt
+        ch = msvcrt.getch()
+        if ch in (b'\x00', b'\xe0'):   # 特殊キー（矢印など）
+            ch2 = msvcrt.getch()
+            if ch2 == b'H':
+                return 'up'
+            if ch2 == b'P':
+                return 'down'
+            if ch2 == b'M':            # 右矢印キー → パス表示
+                return 'menu'
+            return 'enter'
+        if ch == b'\x1b':              # Esc → 戻る
+            return 'back'
+        if ch == b'\x08':              # Backspace → 戻る
+            return 'back'
+        if ch.lower() in (b'q', b'\x03'):   # q / Ctrl+C → 終了
+            return 'quit'
+        return 'enter'
+    except Exception:
+        try:
+            line = input().strip().lower()
+            return 'quit' if line == 'q' else 'enter'
+        except Exception:
+            return 'quit'
+
+
 # ── Shell ──────────────────────────────────────────────────────
 
 class GemShell(cmd.Cmd):
     intro = ""
     prompt = f"{ACCENT}{BOLD}cmd{R} {ACCENT2}>{R} "
 
-    def __init__(self):
+    def __init__(self, quiet: bool = False):
         super().__init__()
+        self._quiet = quiet
         self._data: list[dict] = []
         self._entries: list[tuple[str, str, str]] = []
+        self._watchers: dict[str, "threading.Event"] = {}  # path → stop_event
         self._reload()
+        # テーマ・プロンプトラベルをロードして更新
+        cfg_theme = self._load_cfg_str("theme") or "claude"
+        _apply_theme(cfg_theme)
+        self._prompt_label = self._load_cfg_str("prompt_label")
+        self._update_prompt()
+
+    def _update_prompt(self):
+        if self._prompt_label:
+            self.prompt = f"{ACCENT}{BOLD}{self._prompt_label}{R} {ACCENT2}❯{R} "
+        else:
+            self.prompt = f"{ACCENT2}❯{R} "
+
+    def _load_cfg_str(self, key: str) -> str:
+        try:
+            cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+            return cfg.get(key, "")
+        except Exception:
+            return ""
+
+    def _save_cfg(self, key: str, value: str):
+        try:
+            cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8")) if CONFIG_FILE.exists() else {}
+            cfg[key] = value
+            CONFIG_FILE.write_text(json.dumps(cfg, ensure_ascii=False, indent=2), encoding="utf-8")
+        except Exception:
+            pass
 
     def _reload(self):
         self._data = _load_folders()
@@ -281,21 +464,19 @@ class GemShell(cmd.Cmd):
         D = "\033[38;2;88;78;158m"      # dark body
 
         def row(*cols):
-            """Render one pixel row. None = space, color = filled block █."""
             out = "  "
             for c in cols:
                 out += " " if c is None else (c + "█" + R)
             return out
 
-        _ = None  # blank pixel
+        _ = None
 
-        import datetime
         now = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
         char = [
-            row(_,_,_,O,D,O,_,_,_,O,D,O,_,_),      # two ear bumps
-            row(_,_,O,H,H,H,L,L,L,L,L,O,_,_),       # head top
-            row(_,O,H,H,H,L,L,M,M,M,L,L,O,_),       # upper body
+            row(_,_,_,O,D,O,_,_,_,O,D,O,_,_),
+            row(_,_,O,H,H,H,L,L,L,L,L,O,_,_),
+            row(_,O,H,H,H,L,L,M,M,M,L,L,O,_),
         ]
 
         title = [
@@ -327,23 +508,133 @@ class GemShell(cmd.Cmd):
             print(f"  {WARN}No entries registered.{R}")
             return
 
-        current_cat = None
-        shown = 0
+        # フィルタ済みエントリを収集
+        filtered: list[tuple[int, str, str, str]] = []
         for idx, (cat, name, path) in enumerate(self._entries, 1):
             if filter_cat and filter_cat.lower() not in cat.lower():
                 continue
             if filter_kw and filter_kw.lower() not in name.lower() and filter_kw.lower() not in path.lower():
                 continue
-            if cat != current_cat:
-                print(f"\n  {CAT_CLR}{BOLD}[{cat}]{R}")
-                current_cat = cat
-            tag = _type_tag(path)
-            num = f"{DIM}{idx:3d}.{R}"
-            print(f"  {num} {tag} {BOLD}{name}{R}  {TEXT_SUB}{path}{R}")
-            shown += 1
+            filtered.append((idx, cat, name, path))
 
-        if shown == 0:
+        if not filtered:
             print(f"  {WARN}No matching entries.{R}")
+            return
+
+        self._interactive_list(filtered)
+
+    def _interactive_list(self, filtered: list):
+        """2段階インタラクティストリスト: カテゴリ選択 → アイテム選択。"""
+        # カテゴリごとにアイテムをグループ化（順序保持）
+        groups: dict[str, list[tuple]] = {}
+        for entry in filtered:
+            idx, cat, name, path = entry
+            groups.setdefault(cat, []).append(entry)
+        cats = list(groups.keys())
+
+        try:
+            term_h = os.get_terminal_size().lines
+        except OSError:
+            term_h = 24
+        visible = max(3, term_h - 7)
+
+        # ── レベル1: カテゴリ選択 ──────────────────────────
+        def select_category() -> str | None:
+            """カテゴリ一覧を表示し、選択されたカテゴリ名を返す。q で None。"""
+            sel = 0
+            top = 0
+            n   = len(cats)
+            while True:
+                os.system("cls")
+                print(f"\n  {DIM}Select category  up/down=move  Enter=select  Esc/q=quit{R}\n")
+                if top > 0:
+                    print(f"  {DIM}  ︙{R}")
+                for i in range(top, min(top + visible, n)):
+                    cat   = cats[i]
+                    count = len(groups[cat])
+                    if i == sel:
+                        print(f"  {ACCENT}{BOLD}▶ [{cat}]{R}  {DIM}{count} items{R}")
+                    else:
+                        print(f"    {CAT_CLR}[{cat}]{R}  {DIM}{count} items{R}")
+                if top + visible < n:
+                    print(f"  {DIM}  ︙{R}")
+
+                try:
+                    key = _getch_nav()
+                except KeyboardInterrupt:
+                    return None
+
+                if key in ('quit', 'back'):
+                    return None
+                elif key == 'up' and sel > 0:
+                    sel -= 1
+                    if sel < top:
+                        top = sel
+                elif key == 'down' and sel < n - 1:
+                    sel += 1
+                    if sel >= top + visible:
+                        top += 1
+                elif key == 'enter':
+                    return cats[sel]
+
+        # ── レベル2: アイテム選択 ──────────────────────────
+        def select_item(cat: str) -> bool:
+            """カテゴリ内アイテムを表示。Esc/Backspace でカテゴリに戻る。False=終了。"""
+            items     = groups[cat]
+            n         = len(items)
+            sel       = 0
+            top       = 0
+            show_path = False
+            while True:
+                os.system("cls")
+                print(f"\n  {CAT_CLR}{BOLD}[{cat}]{R}  {DIM}{n} items  up/down=move  Enter=open  →=path  Esc=back  q=quit{R}\n")
+                if top > 0:
+                    print(f"  {DIM}  ︙{R}")
+                for i in range(top, min(top + visible, n)):
+                    idx, _, name, path = items[i]
+                    tag = _type_tag(path)
+                    if i == sel:
+                        print(f"  {ACCENT}{BOLD}▶{R} {DIM}{idx:3d}.{R} {tag} {ACCENT}{BOLD}{name}{R}")
+                        if show_path:
+                            full = str(Path(path).resolve())
+                            print(f"       {DIM}path:{R} {HL}{full}{R}")
+                    else:
+                        print(f"     {DIM}{idx:3d}.{R} {tag} {name}")
+                if top + visible < n:
+                    print(f"  {DIM}  ︙{R}")
+
+                try:
+                    key = _getch_nav()
+                except KeyboardInterrupt:
+                    return False
+
+                if key == 'quit':
+                    return False
+                elif key == 'back':
+                    return True   # カテゴリ選択に戻る
+                elif key == 'up' and sel > 0:
+                    sel -= 1
+                    if sel < top:
+                        top = sel
+                elif key == 'down' and sel < n - 1:
+                    sel += 1
+                    if sel >= top + visible:
+                        top += 1
+                elif key == 'menu':
+                    show_path = not show_path
+                elif key == 'enter':
+                    _, _, name, path = items[sel]
+                    _open_path(path)
+
+        # ── メインループ ───────────────────────────────────
+        while True:
+            cat = select_category()
+            if cat is None:
+                break
+            if not select_item(cat):
+                break
+
+        os.system("cls")
 
     # ── Commands ───────────────────────────────────────────────
 
@@ -535,20 +826,9 @@ class GemShell(cmd.Cmd):
                             print(f"         {DIM}│{R} {TEXT_SUB}{line}{R}")
 
     def do_connect(self, arg: str):
-        """Connect to a terminal.  connect <#|name>"""
+        """Connect to a terminal.  connect [<#|name>]"""
         if not arg.strip():
-            # Show connection list
-            if not self._conns:
-                print(f"  {WARN}No connections registered.{R}")
-                return
-            print(f"\n  {CAT_CLR}{BOLD}[Connections]{R}")
-            for i, c in enumerate(self._conns, 1):
-                proto = c.get("protocol", "SSH")
-                host  = c.get("host", "")
-                name  = c.get("name", host)
-                num   = f"{DIM}{i:3d}.{R}"
-                tag   = f"{ACCENT}[{proto:<6}]{R}"
-                print(f"  {num} {tag} {BOLD}{name}{R}  {TEXT_SUB}{host}{R}")
+            self._interactive_connect()
             return
 
         query = arg.strip()
@@ -597,10 +877,322 @@ class GemShell(cmd.Cmd):
             else:
                 print(f"  {ERR}Invalid number.{R}")
 
+    def _interactive_connect(self):
+        """2-level interactive connect: group -> connection."""
+        if not self._conns:
+            print(f"  {WARN}No connections registered.{R}")
+            return
+
+        # グループごとに接続をまとめる（空グループは "(ungrouped)"）
+        groups: dict[str, list[dict]] = {}
+        for c in self._conns:
+            grp = c.get("group", "") or "(ungrouped)"
+            groups.setdefault(grp, []).append(c)
+        grp_names = list(groups.keys())
+
+        try:
+            term_h = os.get_terminal_size().lines
+        except OSError:
+            term_h = 24
+        visible = max(3, term_h - 7)
+
+        # ── Level 1: group selection ──────────────────────────
+        def select_group() -> str | None:
+            sel = 0
+            top = 0
+            n   = len(grp_names)
+            while True:
+                os.system("cls")
+                print(f"\n  {DIM}Select group  up/down=move  Enter=select  Esc/q=quit{R}\n")
+                if top > 0:
+                    print(f"  {DIM}  ︙{R}")
+                for i in range(top, min(top + visible, n)):
+                    grp   = grp_names[i]
+                    count = len(groups[grp])
+                    if i == sel:
+                        print(f"  {ACCENT}{BOLD}▶ [{grp}]{R}  {DIM}{count} items{R}")
+                    else:
+                        print(f"    {CAT_CLR}[{grp}]{R}  {DIM}{count} items{R}")
+                if top + visible < n:
+                    print(f"  {DIM}  ︙{R}")
+
+                try:
+                    key = _getch_nav()
+                except KeyboardInterrupt:
+                    return None
+
+                if key in ('quit', 'back'):
+                    return None
+                elif key == 'up' and sel > 0:
+                    sel -= 1
+                    if sel < top:
+                        top = sel
+                elif key == 'down' and sel < n - 1:
+                    sel += 1
+                    if sel >= top + visible:
+                        top += 1
+                elif key == 'enter':
+                    return grp_names[sel]
+
+        # ── Level 2: connection selection ─────────────────────
+        def select_conn(grp: str) -> bool:
+            conns       = groups[grp]
+            n           = len(conns)
+            sel         = 0
+            top         = 0
+            show_detail = False
+            while True:
+                os.system("cls")
+                print(f"\n  {CAT_CLR}{BOLD}[{grp}]{R}  {DIM}{n} items  up/down=move  Enter=connect  →=detail  Esc=back  q=quit{R}\n")
+                if top > 0:
+                    print(f"  {DIM}  ︙{R}")
+                for i in range(top, min(top + visible, n)):
+                    c     = conns[i]
+                    proto = c.get("protocol", "SSH")
+                    host  = c.get("host", "")
+                    port  = c.get("port", 22 if proto == "SSH" else 23 if proto == "Telnet" else "")
+                    user  = c.get("user", "")
+                    name  = c.get("name", host)
+                    tag   = f"{ACCENT}[{proto:<6}]{R}"
+                    if i == sel:
+                        print(f"  {ACCENT}{BOLD}▶{R} {tag} {ACCENT}{BOLD}{name}{R}  {DIM}{host}{R}")
+                        if show_detail:
+                            detail = f"{host}:{port}" if port else host
+                            if user:
+                                detail += f"  {DIM}user:{R} {HL}{user}{R}"
+                            print(f"       {DIM}host:{R} {HL}{detail}{R}")
+                    else:
+                        print(f"     {tag} {name}  {TEXT_SUB}{host}{R}")
+                if top + visible < n:
+                    print(f"  {DIM}  ︙{R}")
+
+                try:
+                    key = _getch_nav()
+                except KeyboardInterrupt:
+                    return False
+
+                if key == 'quit':
+                    return False
+                elif key == 'back':
+                    return True
+                elif key == 'menu':
+                    show_detail = not show_detail
+                elif key == 'up' and sel > 0:
+                    sel -= 1
+                    if sel < top:
+                        top = sel
+                elif key == 'down' and sel < n - 1:
+                    sel += 1
+                    if sel >= top + visible:
+                        top += 1
+                elif key == 'enter':
+                    c = conns[sel]
+                    _launch_connection(c)
+
+        while True:
+            grp = select_group()
+            if grp is None:
+                break
+            if not select_conn(grp):
+                break
+
+        os.system("cls")
+
+    def do_theme(self, arg: str):
+        """テーマを切り替える。  theme [name]"""
+        name = arg.strip().lower()
+        if not name:
+            current = self._load_cfg_str("theme") or "lavender"
+            print(f"\n  {ACCENT}Available themes:{R}\n")
+            for t in THEMES:
+                marker = f"  {SUCCESS}←{R}" if t == current else ""
+                swatch = THEMES[t]["ACCENT"] + "██" + R
+                print(f"  {swatch}  {BOLD}{t}{R}{marker}")
+            print(f"\n  {DIM}Usage: theme <name>{R}\n")
+            return
+        if not _apply_theme(name):
+            print(f"  {ERR}Unknown theme '{name}'.{R}  {DIM}Available: {', '.join(THEMES)}{R}")
+            return
+        self._update_prompt()
+        self._save_cfg("theme", name)
+        print(f"  {SUCCESS}Theme changed to '{name}'.{R}")
+
+    def do_prompt(self, arg: str):
+        """プロンプトの表示文字を変更する。  prompt [label]"""
+        label = arg.strip()
+        if not label:
+            print(f"  {DIM}current:{R} {ACCENT}{BOLD}{self._prompt_label}{R} {ACCENT2}>{R}")
+            print(f"  {DIM}Usage: prompt <label>   reset: prompt cmd{R}")
+            return
+        self._prompt_label = label
+        self._update_prompt()
+        self._save_cfg("prompt_label", label)
+        print(f"  {SUCCESS}Prompt changed to '{label}'.{R}")
+
+    def _resolve_path(self, query: str) -> tuple[str, str] | None:
+        """クエリ（インデックス/名前/パス）からフォルダの (name, path) を返す。"""
+        if query.isdigit():
+            idx = int(query) - 1
+            if not (0 <= idx < len(self._entries)):
+                print(f"  {ERR}Index {query} out of range.{R}")
+                return None
+            _, name, path = self._entries[idx]
+            return name, path
+        if os.path.isdir(query.rstrip("\\/")):
+            path = query.rstrip("\\/")
+            return os.path.basename(path) or path, path
+        q = query.lower()
+        matched = [(n, p) for _, n, p in self._entries if q in n.lower() or q in p.lower()]
+        if not matched:
+            print(f"  {ERR}No match for '{query}'.{R}")
+            return None
+        return matched[0]
+
+    def do_watch(self, arg: str):
+        """フォルダ変更をバックグラウンドでログ出力する。  watch <#|name|path> [-r]"""
+        import threading
+
+        tokens = arg.split()
+        if not tokens:
+            # 監視中一覧を表示
+            if not self._watchers:
+                print(f"  {DIM}No folders being watched.{R}")
+            else:
+                print(f"\n  {ACCENT}Watching:{R}")
+                for p in self._watchers:
+                    print(f"  {DIM}·{R} {p}")
+                print()
+            return
+
+        recursive = "-r" in tokens
+        tokens = [t for t in tokens if t != "-r"]
+        query = " ".join(tokens)
+
+        result = self._resolve_path(query)
+        if result is None:
+            return
+        name, path = result
+
+        if not os.path.isdir(path):
+            print(f"  {ERR}'{path}' is not a directory.{R}")
+            return
+
+        if path in self._watchers:
+            print(f"  {WARN}'{name}' is already being watched.{R}")
+            return
+
+        try:
+            import win32file, win32con
+        except ImportError:
+            print(f"  {ERR}pywin32 is required.{R}")
+            return
+
+        _ACTIONS = {
+            1: (SUCCESS, "added "),
+            2: (ERR,     "removed"),
+            3: (WARN,    "modified"),
+            4: (DIM,     "renamed"),
+            5: (ACCENT,  "→     "),
+        }
+
+        stop_event = threading.Event()
+        self._watchers[path] = stop_event
+
+        def _watcher():
+            flags = (
+                win32con.FILE_NOTIFY_CHANGE_FILE_NAME  |
+                win32con.FILE_NOTIFY_CHANGE_DIR_NAME   |
+                win32con.FILE_NOTIFY_CHANGE_LAST_WRITE |
+                win32con.FILE_NOTIFY_CHANGE_SIZE
+            )
+            try:
+                hdir = win32file.CreateFile(
+                    path, win32con.GENERIC_READ,
+                    win32con.FILE_SHARE_READ | win32con.FILE_SHARE_WRITE | win32con.FILE_SHARE_DELETE,
+                    None, win32con.OPEN_EXISTING, win32con.FILE_FLAG_BACKUP_SEMANTICS, None,
+                )
+                while not stop_event.is_set():
+                    results = win32file.ReadDirectoryChangesW(hdir, 65536, recursive, flags, None, None)
+                    if stop_event.is_set():
+                        break
+                    ts = datetime.datetime.now().strftime("%H:%M:%S")
+                    for action, fname in results:
+                        clr, label = _ACTIONS.get(action, (DIM, "?     "))
+                        sys.stdout.write(f"\n  {clr}{BOLD}{label}{R}  {DIM}[{ts}] [{name}]{R}  {fname}\n")
+                        sys.stdout.flush()
+                win32file.CloseHandle(hdir)
+            except Exception:
+                pass
+            finally:
+                self._watchers.pop(path, None)
+
+        threading.Thread(target=_watcher, daemon=True).start()
+        rec_label = "(recursive)" if recursive else ""
+        print(f"  {SUCCESS}Watching:{R} {name}  {DIM}{rec_label}  use 'unwatch' to stop{R}")
+
+    def do_unwatch(self, arg: str):
+        """フォルダ監視を停止する。  unwatch <#|name|path|all>"""
+        query = arg.strip()
+
+        if not self._watchers:
+            print(f"  {DIM}No folders being watched.{R}")
+            return
+
+        if query.lower() == "all":
+            for ev in self._watchers.values():
+                ev.set()
+            self._watchers.clear()
+            print(f"  {SUCCESS}All watchers stopped.{R}")
+            return
+
+        if not query:
+            print(f"  {WARN}Usage: unwatch <index|name|path|all>{R}")
+            return
+
+        # パス解決（直接パスまたはエントリ名）
+        if os.path.isdir(query.rstrip("\\/")):
+            path = query.rstrip("\\/")
+        else:
+            q = query.lower()
+            matched = [p for p in self._watchers if q in p.lower() or q in os.path.basename(p).lower()]
+            if not matched:
+                # エントリ名から解決
+                result = self._resolve_path(query)
+                if result:
+                    path = result[1]
+                else:
+                    return
+            else:
+                path = matched[0]
+
+        if path not in self._watchers:
+            print(f"  {WARN}'{path}' is not being watched.{R}")
+            return
+
+        self._watchers[path].set()
+        print(f"  {SUCCESS}Stopped watching:{R} {path}")
+
+    def do_gem(self, _):
+        """gem.py を起動、またはトレイのウィンドウを前面に出す。  gem"""
+        hwnd = ctypes.windll.user32.FindWindowW(None, "Gem")
+        if hwnd:
+            ctypes.windll.user32.ShowWindow(hwnd, 9)   # SW_RESTORE
+            ctypes.windll.user32.SetForegroundWindow(hwnd)
+            print(f"  {SUCCESS}Gem brought to foreground.{R}")
+        else:
+            gem_path = _BASE_DIR / "gem.py"
+            subprocess.Popen(
+                [sys.executable, str(gem_path)],
+                creationflags=subprocess.DETACHED_PROCESS | subprocess.CREATE_NEW_PROCESS_GROUP,
+            )
+            print(f"  {SUCCESS}Gem launched.{R}")
+
     def do_reload(self, _):
         """Reload config.json."""
         self._reload()
-        self._print_banner()
+        if not self._quiet:
+            self._print_banner()
+        self._print_help_hint()
         print(f"  {SUCCESS}Reloaded.{R} ({len(self._entries)} folders, {len(self._conns)} connections, {len(self._tasks)} tasks)")
         self._print_wip_tasks()
 
@@ -618,6 +1210,12 @@ class GemShell(cmd.Cmd):
 
   {ACCENT}find{R} <keyword>           Search without opening
 
+  {ACCENT}watch{R} <#|name|path>       Watch folder changes in background
+  {ACCENT}watch{R} <#|name|path> {DIM}-r{R}   Watch recursively (include subfolders)
+  {ACCENT}watch{R}                    List active watchers
+  {ACCENT}unwatch{R} <#|name|path>    Stop watching a folder
+  {ACCENT}unwatch all{R}              Stop all watchers
+
   {ACCENT}tasks{R}                    Show all tasks
   {ACCENT}tasks -e{R} <event>         Filter by event/category
   {ACCENT}tasks --todo{R}             Show incomplete tasks only
@@ -629,12 +1227,40 @@ class GemShell(cmd.Cmd):
   {ACCENT}connect{R}                  List terminal connections
   {ACCENT}connect{R} <#|name>         Connect to a terminal
 
+  {ACCENT}theme{R}                    List available themes
+  {ACCENT}theme{R} <name>             Switch theme  {DIM}({', '.join(THEMES)}){R}
+
+  {ACCENT}prompt{R}                   Show current prompt label
+  {ACCENT}prompt{R} <label>           Change prompt label  {DIM}(e.g. prompt ★  prompt gem){R}
+
+  {ACCENT}gem{R}                      Launch Gem / restore from tray
+
   {ACCENT}reload{R}                   Reload config.json
+  {ACCENT}!{R}<command>               Run a system command  {DIM}(e.g. !dir  !ipconfig){R}
+
   {ACCENT}exit{R} / {ACCENT}quit{R}               Quit the shell
 
   {DIM}Type indicators:{R}
   {ACCENT}[dir ]{R}  folder    {FILE_CLR}[file]{R}  file    {ERR}[miss]{R}  not found
 """)
+
+    def do_keytest(self, _):
+        """キーコード確認用。押したキーの16進コードを表示する。Ctrl+C で終了。"""
+        import msvcrt
+        print(f"  {DIM}Press any key (Ctrl+C to exit)...{R}")
+        try:
+            while True:
+                ch = msvcrt.getch()
+                if ch == b'\x03':
+                    break
+                if ch in (b'\x00', b'\xe0'):
+                    ch2 = msvcrt.getch()
+                    print(f"  {ACCENT}special:{R} {ch!r} + {ch2!r}  (hex: {ch.hex()} {ch2.hex()})")
+                else:
+                    print(f"  {ACCENT}key:{R} {ch!r}  (hex: {ch.hex()})")
+        except KeyboardInterrupt:
+            pass
+        print(f"  {DIM}done{R}")
 
     def do_exit(self, _):
         """Exit the shell."""
@@ -646,11 +1272,12 @@ class GemShell(cmd.Cmd):
         return self.do_exit(_)
 
     def default(self, line: str):
-        stripped = line.strip()
-        if stripped.isdigit():
-            self.do_open(stripped)
-        else:
-            print(f"  {ERR}Unknown command:{R} {line}  {DIM}(type 'help' for list){R}")
+        if line.startswith("!"):
+            cmd = line[1:].strip()
+            if cmd:
+                subprocess.run(cmd, shell=True)
+            return
+        print(f"  {ERR}Unknown command:{R} {line}  {DIM}(type 'help' for list){R}")
 
     def emptyline(self):
         pass
@@ -671,7 +1298,9 @@ class GemShell(cmd.Cmd):
                 if self.cmdqueue:
                     line = self.cmdqueue.pop(0)
                 else:
-                    sys.stdout.write(self.prompt)
+                    now = datetime.datetime.now().strftime("%H:%M")
+                    time_prefix = f"{TEXT_SUB}{now}{R} "
+                    sys.stdout.write(time_prefix + self.prompt)
                     sys.stdout.flush()
                     try:
                         line = input()
@@ -748,8 +1377,9 @@ class GemShell(cmd.Cmd):
         print(f"  {WARN}{BOLD}▶ Working:{R}{bar_part} {BOLD}{name}{R}{event_part}{elapsed_part}{dl_part}")
         print()
 
-    def cmdloop_with_banner(self):
-        self._print_banner()
+    def cmdloop_with_banner(self, quiet: bool = False):
+        if not quiet:
+            self._print_banner()
         self._print_help_hint()
         self._print_wip_tasks()
         try:
@@ -773,9 +1403,10 @@ class GemShell(cmd.Cmd):
 
 
 def main():
+    quiet = "-q" in sys.argv
     _set_console_icon(str(_BASE_DIR / "gem.ico"))
-    shell = GemShell()
-    shell.cmdloop_with_banner()
+    shell = GemShell(quiet=quiet)
+    shell.cmdloop_with_banner(quiet=quiet)
 
 
 if __name__ == "__main__":
