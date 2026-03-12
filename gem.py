@@ -26,7 +26,7 @@ from pathlib import Path
 from PIL import ImageGrab, Image
 import pystray
 
-# cx_Freeze などで凍結した場合は sys.executable の親ディレクトリを基準にする
+# When frozen with cx_Freeze, use the parent of sys.executable as base
 _BASE_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
 
 CONFIG_FILE   = _BASE_DIR / "config.json"
@@ -148,7 +148,7 @@ THEMES: dict[str, dict] = {
         "tab_act": "#FFF8FA", "tab_inact": "#FFE0EC",
         "btn_del": "#D05878", "btn_del_h": "#B03858",
     },
-    "plush": {   # ぬいぐるみ調 soft periwinkle lavender
+    "plush": {   # soft periwinkle lavender
         "bg": "#EAE5F8", "card": "#F5F2FF", "card_h": "#DAD2F8",
         "accent": "#9E92D6", "accent_dk": "#7C6FBF", "accent_lt": "#C6BEE8",
         "text": "#2A2055", "text_sub": "#6E65A5", "border": "#C8C0E8",
@@ -250,14 +250,14 @@ ICON_PALETTES: dict[str, dict] = {
     },
 }
 
-FONT_BASE  = 11  # ベースフォントサイズ（設定で変更可能）
+FONT_BASE  = 11  # base font size (configurable)
 FONT       = ("Segoe UI", 11)
 FONT_BOLD  = ("Segoe UI", 11, "bold")
 FONT_SMALL = ("Segoe UI", 9)
 
 
 def _update_fonts(size: int):
-    """グローバルフォントをベースサイズに合わせて更新する。"""
+    """Update global fonts to match the base size."""
     global FONT_BASE, FONT, FONT_BOLD, FONT_SMALL
     FONT_BASE  = size
     FONT       = ("Segoe UI", size)
@@ -283,7 +283,7 @@ def _fmt_duration(seconds: float) -> str:
 
 
 def _draw_rounded_rect(canvas, x1, y1, x2, y2, r, **kw):
-    """Canvasに角丸長方形を塗りつぶして描画する。"""
+    """Draw a filled rounded rectangle on a Canvas."""
     kw.setdefault("outline", "")
     r = max(1, min(r, (x2 - x1) // 2, (y2 - y1) // 2))
     for ax, ay, start in (
@@ -301,7 +301,7 @@ def _draw_rounded_rect(canvas, x1, y1, x2, y2, r, **kw):
 # ── Icon generation ───────────────────────────────────────
 
 def _make_icon_png(palette: dict | None = None) -> str:
-    """うさぎ耳クラゲアイコン PNG を生成して Base64 で返す。"""
+    """Generate the rabbit-ear jellyfish icon PNG and return it as Base64."""
     p = palette or ICON_PALETTES["violet"]
     W, H = 32, 32
     T   = (  0,   0,   0,   0)
@@ -311,7 +311,7 @@ def _make_icon_png(palette: dict | None = None) -> str:
     F   = p["F"]
     MD  = p["MD"]
 
-    # ── ベル（頭部）: 真円 center=(15,16) r=10 （4px 下にずらし）──
+    # ── Bell (head): circle center=(15,16) r=10 (shifted 4px down) ──
     BELL = {
          7: (11, 19),
          8: ( 9, 21),
@@ -343,7 +343,7 @@ def _make_icon_png(palette: dict | None = None) -> str:
         if not in_bell(x, y): return False
         return any(not in_bell(x+dx, y+dy) for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)))
 
-    # ── 耳（幅広の丸耳、2px 下にずらし） ───────────────────────
+    # ── Ears (wide rounded, shifted 2px down) ──────────────────────
     L_EAR    = {4: ( 8,12), 5: ( 7,13), 6: ( 7,13), 7: ( 7,13), 8: ( 8,12)}
     R_EAR    = {4: (18,22), 5: (17,23), 6: (17,23), 7: (17,23), 8: (18,22)}
     L_EAR_IN = {4: ( 9,11), 5: ( 8,12), 6: ( 8,12), 7: ( 8,12)}
@@ -356,7 +356,7 @@ def _make_icon_png(palette: dict | None = None) -> str:
         return any(not in_ear(x+dx, y+dy) and not in_bell(x+dx, y+dy)
                    for dx, dy in ((1,0),(-1,0),(0,1),(0,-1)))
 
-    # ── 触手（5本、短め、わずかに広がる） ────────────────────────
+    # ── Tentacles (5, short, slightly spreading) ───────────────────
     TENTACLE: set[tuple[int, int]] = set()
     TENTACLE_EDGE: set[tuple[int, int]] = set()
     for base_x, drift in ((7, -1), (12, 0), (17, 0), (22, 1)):
@@ -377,14 +377,14 @@ def _make_icon_png(palette: dict | None = None) -> str:
             return F
         if (x, y) in TENTACLE_EDGE and not in_bell(x, y) and not in_ear(x, y):
             return BDR
-        # 耳（フラット: エッジはBDR、内耳はLT、それ以外はF）
+        # Ears (flat: edge=BDR, inner=LT, fill=F)
         if in_ear(x, y):
             if is_ear_edge(x, y): return BDR
             if ear_inner(x, y):   return LT
             return F
         if not in_bell(x, y):
             return T
-        # ベル（淡い立体感: 上部中央〜左にハイライト、下部に軽いシャドウ）
+        # Bell (subtle 3D: highlight top-center/left, light shadow bottom)
         if is_bell_edge(x, y): return BDR
         dx = x - 15
         if y <= 16 and dx <= 1:
@@ -393,7 +393,7 @@ def _make_icon_png(palette: dict | None = None) -> str:
             return MD
         return F
 
-    # 32×32 で描画してから 2× (64×64) にスケールアップ
+    # Draw at 32x32 then scale up 2x to 64x64
     OUT = 2
     W_OUT, H_OUT = W * OUT, H * OUT
     pixels = [[px(x, y) for x in range(W)] for y in range(H)]
@@ -433,7 +433,7 @@ def _setup_taskbar_icon(root: tk.Tk, palette: dict | None = None) -> None:
     force = palette is not None
     if not force:
         if getattr(sys, "frozen", False):
-            # 凍結実行ファイルではスクリプト自体が存在しないので mtime 比較をスキップ
+            # Skip mtime check when running as a frozen executable
             force = not ico_path.exists()
         else:
             script_mtime = Path(__file__).stat().st_mtime
@@ -631,123 +631,139 @@ def _launch_smb(conn: dict):
 
 
 class ConnectionDialog(tk.Toplevel):
-    """Dialog for adding/editing connections."""
+    """Dialog for adding/editing connections.
+    Multiple protocols can be selected when adding. result is list[dict].
+    """
+
+    # Default port per protocol
+    _PROTO_PORT = {"SSH": 22, "Telnet": 23, "RDP": 3389, "SMB": 0}
 
     def __init__(self, parent, initial: dict | None = None,
                  groups: list[str] | None = None):
         super().__init__(parent)
-        self.title("Add Connection" if initial is None else "Edit Connection")
+        self._edit_mode = initial is not None
+        self.title("Edit Connection" if self._edit_mode else "Add Connection")
         self.configure(bg=C["bg"])
-        self.resizable(False, False)
+        self.resizable(True, False)
         self.grab_set()
-        self.result: dict | None = None
+        self.result: list[dict] = []
         self._groups = groups or []
 
         d = initial or {}
-        self._name_var = tk.StringVar(value=d.get("name", ""))
-        self._proto   = tk.StringVar(value=d.get("protocol", "SSH"))
-        self._host    = tk.StringVar(value=d.get("host", ""))
-        self._port    = tk.StringVar(value=str(d.get("port", 22)))
-        self._user    = tk.StringVar(value=d.get("user", ""))
-        self._pw      = tk.StringVar(value=_decode_pw(d.get("password", "")))
-        self._charset = tk.StringVar(value=d.get("charset", "UTF-8"))
+        self._name_var  = tk.StringVar(value=d.get("name", ""))
+        self._host      = tk.StringVar(value=d.get("host", ""))
+        self._user      = tk.StringVar(value=d.get("user", ""))
+        self._pw        = tk.StringVar(value=_decode_pw(d.get("password", "")))
         self._group_var = tk.StringVar(value=d.get("group", ""))
+
+        # Per-protocol settings (add: multi-select / edit: single)
+        init_proto = d.get("protocol", "SSH")
+        self._proto_enabled: dict[str, tk.BooleanVar] = {}
+        self._proto_port:    dict[str, tk.StringVar]  = {}
+        self._proto_charset: dict[str, tk.StringVar]  = {}
+        for p, dp in self._PROTO_PORT.items():
+            enabled = (p == init_proto) if self._edit_mode else (p == "SSH")
+            self._proto_enabled[p] = tk.BooleanVar(value=enabled)
+            port_val = str(d.get("port", dp)) if p == init_proto else str(dp)
+            self._proto_port[p]    = tk.StringVar(value=port_val)
+            cs_val = d.get("charset", "UTF-8") if p == init_proto else "UTF-8"
+            self._proto_charset[p] = tk.StringVar(value=cs_val)
+
+        # SMB-specific: UNC path (\\server\share format)
+        smb_unc_init = d.get("host", "") if init_proto == "SMB" else ""
+        self._smb_unc = tk.StringVar(value=smb_unc_init)
+
         self._init_cmds = "\n".join(d.get("commands", []))
+        self._show_pw   = False
 
-        self._proto.trace_add("write", self._on_proto_change)
         self._build()
-
         self.update_idletasks()
         px = parent.winfo_x() + (parent.winfo_width()  - self.winfo_width())  // 2
         py = parent.winfo_y() + (parent.winfo_height() - self.winfo_height()) // 2
         self.geometry(f"+{px}+{py}")
         self.wait_window()
 
-    def _row(self, label: str, row: int, var: tk.StringVar,
-             show: str = "", width: int = 22):
-        lbl = tk.Label(self._form, text=label, bg=C["bg"], fg=C["text_sub"],
-                       font=FONT_SMALL, anchor="e", width=10)
-        lbl.grid(row=row, column=0, padx=(12, 4), pady=3, sticky="e")
-        e = tk.Entry(self._form, textvariable=var, font=FONT,
-                     bg=C["card"], fg=C["text"], relief="flat", bd=1,
-                     insertbackground=C["accent"], width=width, show=show)
-        e.grid(row=row, column=1, padx=(0, 12), pady=3, sticky="ew")
-        return lbl, e
+    # ── Helpers ─────────────────────────────────────────────
+    def _lbl(self, parent, text: str, width: int = 10) -> tk.Label:
+        return tk.Label(parent, text=text, bg=C["bg"], fg=C["text_sub"],
+                        font=FONT_SMALL, anchor="e", width=width)
 
+    def _entry(self, parent, var: tk.StringVar, show: str = "",
+               width: int = 22) -> tk.Entry:
+        return tk.Entry(parent, textvariable=var, font=FONT,
+                        bg=C["card"], fg=C["text"], relief="flat", bd=1,
+                        insertbackground=C["accent"], width=width, show=show)
+
+    # ── UI build ────────────────────────────────────────────
     def _build(self):
-        self._form = tk.Frame(self, bg=C["bg"])
-        self._form.pack(padx=4, pady=(12, 4))
+        form = tk.Frame(self, bg=C["bg"])
+        form.pack(fill="x", padx=12, pady=(12, 4))
+        form.columnconfigure(1, weight=1)
 
-        self._row("Name",     0, self._name_var)
-        # Protocol dropdown
-        tk.Label(self._form, text="Protocol", bg=C["bg"], fg=C["text_sub"],
-                 font=FONT_SMALL, anchor="e", width=10).grid(
-                     row=1, column=0, padx=(12, 4), pady=3, sticky="e")
-        combo = ttk.Combobox(self._form, textvariable=self._proto,
-                             values=["SSH", "Telnet", "RDP", "SMB"], state="readonly",
-                             font=FONT, width=20)
-        combo.grid(row=1, column=1, padx=(0, 12), pady=3, sticky="ew")
+        def _row(label, var, r, show=""):
+            self._lbl(form, label).grid(row=r, column=0, padx=(0, 6), pady=3, sticky="e")
+            e = self._entry(form, var, show=show)
+            e.grid(row=r, column=1, columnspan=2, pady=3, sticky="ew")
+            return e
 
-        self._host_lbl, _ = self._row("Host",     2, self._host)
-        self._port_lbl, self._port_entry = self._row("Port", 3, self._port, width=8)
-        self._row("Username", 4, self._user)
-        _, self._pw_entry = self._row("Password", 5, self._pw, show="*")
-        self._show_pw = False
+        _row("Name",     self._name_var, 0)
+        _row("Host",     self._host,     1)
+        _row("Username", self._user,     2)
+        pw_e = _row("Password", self._pw, 3, show="*")
+        self._pw_entry = pw_e
         self._pw_toggle = tk.Button(
-            self._form, text="show", font=("Segoe UI", 8),
+            form, text="show", font=("Segoe UI", 8),
             bg=C["bg"], fg=C["text_sub"], relief="flat", bd=0,
             cursor="hand2", command=self._toggle_pw,
         )
-        self._pw_toggle.grid(row=5, column=2, padx=(0, 4), pady=3)
+        self._pw_toggle.grid(row=3, column=3, padx=(2, 0), pady=3)
 
-        # charset selection
-        self._charset_lbl = tk.Label(self._form, text="Charset", bg=C["bg"], fg=C["text_sub"],
-                                     font=FONT_SMALL, anchor="e", width=10)
-        self._charset_lbl.grid(row=6, column=0, padx=(12, 4), pady=3, sticky="e")
-        self._charset_combo = ttk.Combobox(
-            self._form, textvariable=self._charset,
-            values=["UTF-8", "SJIS", "EUC", "JIS"],
-            state="readonly", font=FONT, width=20,
-        )
-        self._charset_combo.grid(row=6, column=1, padx=(0, 12), pady=3, sticky="ew")
+        self._lbl(form, "Group").grid(row=4, column=0, padx=(0, 6), pady=3, sticky="e")
+        ttk.Combobox(form, textvariable=self._group_var,
+                     values=self._groups, font=FONT, width=20
+                     ).grid(row=4, column=1, columnspan=2, pady=3, sticky="ew")
 
-        # group selection
-        tk.Label(self._form, text="Group", bg=C["bg"], fg=C["text_sub"],
-                 font=FONT_SMALL, anchor="e", width=10).grid(
-                     row=7, column=0, padx=(12, 4), pady=3, sticky="e")
-        self._group_combo = ttk.Combobox(
-            self._form, textvariable=self._group_var,
-            values=self._groups, font=FONT, width=20,
-        )
-        self._group_combo.grid(row=7, column=1, padx=(0, 12), pady=3, sticky="ew")
+        # ── Protocol section ─────────────────────────────────
+        sep = tk.Frame(self, bg=C["border"], height=1)
+        sep.pack(fill="x", padx=12, pady=(6, 0))
+        tk.Label(self, text="Protocols", bg=C["bg"], fg=C["text_sub"],
+                 font=FONT_SMALL, anchor="w").pack(fill="x", padx=14, pady=(4, 2))
 
-        # command input area
-        self._cmd_lbl = tk.Label(self._form, text="Commands", bg=C["bg"], fg=C["text_sub"],
-                                 font=FONT_SMALL, anchor="ne", width=10)
-        self._cmd_lbl.grid(row=8, column=0, padx=(12, 4), pady=(6, 3), sticky="ne")
+        proto_frame = tk.Frame(self, bg=C["bg"])
+        proto_frame.pack(fill="x", padx=12, pady=(0, 4))
+        self._proto_rows: dict[str, tk.Frame] = {}
+        for p in ("SSH", "Telnet", "RDP", "SMB"):
+            self._build_proto_row(proto_frame, p)
+
+        # ── Commands (shared for SSH/Telnet/RDP) ─────────────
+        self._cmd_section = tk.Frame(self, bg=C["bg"])
+        self._cmd_section.pack(fill="x", padx=12, pady=(0, 4))
+        tk.Label(self._cmd_section, text="Commands", bg=C["bg"], fg=C["text_sub"],
+                 font=FONT_SMALL, anchor="w").pack(fill="x")
         self._cmd_text = tk.Text(
-            self._form, font=("Consolas", 9),
+            self._cmd_section, font=("Consolas", 9),
             bg=C["card"], fg=C["text"], relief="flat", bd=1,
-            insertbackground=C["accent"],
-            width=24, height=5,
-            wrap="none",
+            insertbackground=C["accent"], width=34, height=4, wrap="none",
         )
         self._cmd_text.insert("1.0", self._init_cmds)
-        self._cmd_text.grid(row=8, column=1, padx=(0, 12), pady=(6, 3), sticky="ew")
-        hint_row = tk.Frame(self._form, bg=C["bg"])
-        hint_row.grid(row=9, column=1, padx=(0, 12), pady=(0, 2), sticky="ew")
-        self._cmd_hint = tk.Label(hint_row, text="One command per line\nExecuted after login",
-                                  bg=C["bg"], fg=C["text_sub"],
-                                  font=("Segoe UI", 7), justify="left")
-        self._cmd_hint.pack(side="left")
+        self._cmd_text.pack(fill="x")
+        hint_row = tk.Frame(self._cmd_section, bg=C["bg"])
+        hint_row.pack(fill="x", pady=(2, 0))
+        tk.Label(hint_row, text="One command per line  /  Executed after login",
+                 bg=C["bg"], fg=C["text_sub"],
+                 font=("Segoe UI", 7)).pack(side="left")
         tk.Button(hint_row, text="Import...", command=self._import_cmd_file,
                   bg=C["card"], fg=C["text_sub"], relief="flat", bd=0,
                   font=("Segoe UI", 7), cursor="hand2", padx=6, pady=1,
                   activebackground=C["card_h"], activeforeground=C["text"],
                   ).pack(side="right")
 
+        self._update_cmd_section()
+
+        # ── Button row ───────────────────────────────────────
+        tk.Frame(self, bg=C["border"], height=1).pack(fill="x", padx=0, pady=(4, 0))
         btn_frame = tk.Frame(self, bg=C["bg"])
-        btn_frame.pack(fill="x", padx=16, pady=(4, 14))
+        btn_frame.pack(fill="x", padx=16, pady=(6, 14))
         tk.Button(btn_frame, text="Connect & Save", command=self._ok,
                   bg=C["accent"], fg="white", relief="flat", bd=0,
                   font=FONT_BOLD, cursor="hand2", padx=12, pady=4,
@@ -758,6 +774,73 @@ class ConnectionDialog(tk.Toplevel):
                   font=FONT, cursor="hand2", padx=10, pady=4,
                   activebackground=C["border"], activeforeground=C["text"],
                   ).pack(side="right")
+
+    def _build_proto_row(self, parent: tk.Frame, proto: str):
+        """Build one protocol row (checkbox + port + charset)."""
+        row = tk.Frame(parent, bg=C["bg"])
+        row.pack(fill="x", pady=1)
+        self._proto_rows[proto] = row
+
+        cb = tk.Checkbutton(
+            row, text=proto, variable=self._proto_enabled[proto],
+            bg=C["bg"], fg=C["text"], selectcolor=C["card"],
+            activebackground=C["bg"], activeforeground=C["text"],
+            font=FONT_SMALL, width=6, anchor="w", cursor="hand2",
+            command=self._update_cmd_section,
+        )
+        cb.pack(side="left")
+
+        # Lock checkbox in edit mode
+        if self._edit_mode:
+            cb.configure(state="disabled")
+
+        # Port (not shown for SMB)
+        if proto != "SMB":
+            tk.Label(row, text="Port:", bg=C["bg"], fg=C["text_sub"],
+                     font=FONT_SMALL).pack(side="left", padx=(8, 2))
+            tk.Entry(row, textvariable=self._proto_port[proto],
+                     font=FONT, bg=C["card"], fg=C["text"],
+                     relief="flat", bd=1, insertbackground=C["accent"],
+                     width=6).pack(side="left")
+
+        # Charset (SSH / Telnet only)
+        if proto in ("SSH", "Telnet"):
+            tk.Label(row, text="Charset:", bg=C["bg"], fg=C["text_sub"],
+                     font=FONT_SMALL).pack(side="left", padx=(10, 2))
+            ttk.Combobox(row, textvariable=self._proto_charset[proto],
+                         values=["UTF-8", "SJIS", "EUC", "JIS"],
+                         state="readonly", font=FONT, width=8,
+                         ).pack(side="left")
+
+        # SMB-specific: UNC Path field (visible only when SMB is checked)
+        if proto == "SMB":
+            unc_row = tk.Frame(parent, bg=C["bg"])
+            tk.Label(unc_row, text="UNC Path:", bg=C["bg"], fg=C["text_sub"],
+                     font=FONT_SMALL).pack(side="left", padx=(22, 4))
+            tk.Entry(unc_row, textvariable=self._smb_unc,
+                     font=FONT, bg=C["card"], fg=C["text"],
+                     relief="flat", bd=1, insertbackground=C["accent"],
+                     width=26).pack(side="left", fill="x", expand=True)
+            tk.Label(unc_row, text="Leave blank to use \\\\{Host}",
+                     bg=C["bg"], fg=C["text_sub"],
+                     font=("Segoe UI", 7)).pack(side="left", padx=(6, 0))
+
+            def _toggle_unc_row(*_):
+                if self._proto_enabled["SMB"].get():
+                    unc_row.pack(fill="x", pady=(0, 2))
+                else:
+                    unc_row.pack_forget()
+
+            self._proto_enabled["SMB"].trace_add("write", _toggle_unc_row)
+            _toggle_unc_row()  # apply initial state
+
+    def _update_cmd_section(self):
+        """Show Commands section only when SSH, Telnet, or RDP is enabled."""
+        show = any(self._proto_enabled[p].get() for p in ("SSH", "Telnet", "RDP"))
+        if show:
+            self._cmd_section.pack(fill="x", padx=12, pady=(0, 4))
+        else:
+            self._cmd_section.pack_forget()
 
     def _import_cmd_file(self):
         path = filedialog.askopenfilename(
@@ -772,10 +855,8 @@ class ConnectionDialog(tk.Toplevel):
         except Exception as e:
             messagebox.showerror("Import Error", str(e), parent=self)
             return
-        # Append to existing content (with a blank line separator)
         current = self._cmd_text.get("1.0", "end-1c").rstrip("\n")
-        new_lines = text.rstrip("\n")
-        merged = (current + "\n" + new_lines) if current else new_lines
+        merged = (current + "\n" + text.rstrip("\n")) if current else text.rstrip("\n")
         self._cmd_text.delete("1.0", "end")
         self._cmd_text.insert("1.0", merged)
 
@@ -787,50 +868,46 @@ class ConnectionDialog(tk.Toplevel):
             fg=C["accent"] if self._show_pw else C["text_sub"],
         )
 
-    def _on_proto_change(self, *_):
-        proto = self._proto.get()
-        defaults = {"SSH": "22", "Telnet": "23", "RDP": "3389"}
-        if proto in defaults and self._port.get() in ("22", "23", "3389"):
-            self._port.set(defaults[proto])
-        is_smb = (proto == "SMB")
-        is_rdp = (proto == "RDP")
-        for w in (self._port_lbl, self._port_entry,
-                  self._cmd_lbl, self._cmd_text, self._cmd_hint):
-            if is_smb:
-                w.grid_remove()
-            else:
-                w.grid()
-        # Charset is shown for SSH/Telnet only
-        for w in (self._charset_lbl, self._charset_combo):
-            if is_smb or is_rdp:
-                w.grid_remove()
-            else:
-                w.grid()
-        self._host_lbl.configure(text="UNC Path" if is_smb else "Host")
-
     def _ok(self):
-        if not self._name_var.get().strip() or not self._host.get().strip():
+        name = self._name_var.get().strip()
+        host = self._host.get().strip()
+        if not name or not host:
             messagebox.showwarning("Input Error",
                                    "Name and Host are required.", parent=self)
             return
-        proto = self._proto.get()
-        cmds = [] if proto == "SMB" else [
-            l.strip() for l in self._cmd_text.get("1.0", "end").splitlines()
-            if l.strip()
-        ]
-        port_str = self._port.get().strip()
-        charset = self._charset.get() if proto in ("SSH", "Telnet") else ""
-        self.result = {
-            "name":     self._name_var.get().strip(),
-            "protocol": proto,
-            "host":     self._host.get().strip(),
-            "port":     int(port_str) if port_str else 0,
+        selected = [p for p in ("SSH", "Telnet", "RDP", "SMB")
+                    if self._proto_enabled[p].get()]
+        if not selected:
+            messagebox.showwarning("Input Error",
+                                   "Select at least one protocol.", parent=self)
+            return
+
+        cmds = [l.strip() for l in self._cmd_text.get("1.0", "end").splitlines()
+                if l.strip()]
+        base = {
+            "host":     host,
             "user":     self._user.get().strip(),
             "password": _encode_pw(self._pw.get()),
-            "commands": cmds,
-            "charset":  charset,
             "group":    self._group_var.get().strip(),
         }
+        multi = len(selected) > 1
+        for proto in selected:
+            entry = dict(base)
+            entry["protocol"] = proto
+            entry["name"] = f"{name} ({proto})" if multi else name
+            port_str = self._proto_port[proto].get().strip()
+            entry["port"] = int(port_str) if port_str and proto != "SMB" else 0
+            entry["charset"] = (self._proto_charset[proto].get()
+                                 if proto in ("SSH", "Telnet") else "")
+            entry["commands"] = cmds if proto != "SMB" else []
+            if proto == "SMB":
+                # UNC Path 欄が空なら \\{host} を自動生成
+                unc = self._smb_unc.get().strip()
+                if not unc:
+                    unc = f"\\\\{host}"
+                entry["host"] = unc
+            self.result.append(entry)
+
         self.destroy()
 
 
@@ -3062,18 +3139,9 @@ class FolderLauncher(tk.Tk):
         ("notify",    "Notify",    -3),
         ("web",       "Web",       -4),
         ("clip",      "Clip",      -5),
-        ("ping",      "Ping",      -6),
-        ("memo",      "Memo",      -7),
         ("grep",      "Search",   -12),
     ]
     _DEFAULT_PINS = ["terminal", "tasks", "notify"]
-
-    # Ping monitor constants
-    _PING_HISTORY = 30   # number of entries retained in bar chart
-    _PING_BAR_W   = 16   # bar width (px)
-    _PING_BAR_GAP = 2    # bar gap (px)
-    _PING_ROW_H   = 80   # host row height (px)
-    _PING_MAX_MS  = 500  # graph vertical axis upper limit (ms)
 
     def __init__(self):
         super().__init__()
@@ -3096,11 +3164,9 @@ class FolderLauncher(tk.Tk):
         self._selected_group: str | None = None   # None = All
         self._bookmarks: list[dict] = []
         self._bm_selected: int = 0
-        self._active: int = 0   # -1=Terminal, -2=Tasks, -3=Notify, -4=Web, -5=Clip, -6=Ping, -7=Memo
+        self._active: int = 0   # -1=Terminal, -2=Tasks, -3=Notify, -4=Web, -5=Clip
         self._pinned_tabs: list[str] = list(self._DEFAULT_PINS)
         self._tab_offset: int = 0   # category tab scroll position
-        self._memos: list[dict] = []   # {"title": str, "body": str}
-        self._memo_sel: int | None = None
         self._work_active: dict | None = None  # {"task_idx": int, "start": datetime}
         self._tray_icon: pystray.Icon | None = None
         self._work_anim_id = None
@@ -3110,16 +3176,6 @@ class FolderLauncher(tk.Tk):
         self._tick_id = None             # after ID for _tick() (cancelled on rebuild)
         self._clip_history: list[dict] = []   # {"text": str, "ts": str}
         self._clip_prev: str = ""             # previous clipboard value (for change detection)
-        self._ping_hosts: list[str] = []
-        self._ping_data:  dict[str, list] = {}   # host -> [ms|None, ...]
-        self._ping_interval: int = 5
-        self._ping_enabled: bool = True
-        self._ping_running: bool = False
-        self._ping_lock = threading.Lock()
-        self._ping_next_id  = None   # after ID for next ping round
-        self._ping_graph_id = None   # after ID for graph update loop
-        self._ping_canvases:   dict[str, tk.Canvas] = {}
-        self._ping_stat_vars:  dict[str, tk.StringVar] = {}
         # Auto tab: rule management
         self._rules: list[dict] = []
         self._rule_fired: set[str] = set()
@@ -3146,7 +3202,7 @@ class FolderLauncher(tk.Tk):
 
         self._notified: set[str] = set()  # tracks already-notified keys
         self._notify_past_open: bool = False  # open/close state of past notifications section
-        self._prev_bp: str = "md"  # レスポンシブ: 前回のブレークポイント
+        self._prev_bp: str = "md"  # responsive: previous breakpoint
         self._grep_folder: str = ""
         self._grep_query:  str = ""
         self._grep_ext:    str = ""
@@ -3236,14 +3292,7 @@ class FolderLauncher(tk.Tk):
         # clipboard history
         self._clip_history = cfg.get("clipboard_history", [])
 
-        # Ping monitor
-        self._ping_hosts    = cfg.get("ping_hosts", [])
-        self._ping_interval = cfg.get("ping_interval", 5)
-        self._ping_enabled  = cfg.get("ping_enabled", True)
         self._conn_ping_enabled = cfg.get("conn_ping_enabled", True)
-
-        # Memo pad
-        self._memos = cfg.get("memos", [])
 
         # tab pin settings
         self._pinned_tabs = cfg.get("pinned_tabs", list(self._DEFAULT_PINS))
@@ -3283,9 +3332,6 @@ class FolderLauncher(tk.Tk):
             "notify_display_sec":  self._notify_display_sec.get() if hasattr(self, "_notify_display_sec") else 8,
             "theme":           self._theme,
             "clipboard_history": self._clip_history,
-            "ping_hosts":      self._ping_hosts,
-            "ping_interval":   self._ping_interval,
-            "ping_enabled":    self._ping_enabled,
             "conn_ping_enabled": self._conn_ping_enabled,
             "topmost":         self.attributes("-topmost"),
             "alpha":           self.attributes("-alpha"),
@@ -3294,7 +3340,6 @@ class FolderLauncher(tk.Tk):
             "grep_folder":     self._grep_folder,
             "grep_query":      self._grep_query,
             "grep_ext":        self._grep_ext,
-            "memos":         self._memos,
             "pinned_tabs":   self._pinned_tabs,
             "rules":         self._rules,
             "active_work":   self._active_work_record(),
@@ -3320,10 +3365,10 @@ class FolderLauncher(tk.Tk):
     def _current(self) -> dict:
         return self._data[self._active]
 
-    # ── レスポンシブ制御 ──────────────────────────────────
+    # ── Responsive layout ────────────────────────────────
 
     def _width_bp(self) -> str:
-        """現在のウィンドウ幅に応じたブレークポイント名を返す (xs/sm/md)。"""
+        """Return the current width breakpoint name (xs/sm/md)."""
         try:
             w = self.winfo_width()
         except Exception:
@@ -3335,11 +3380,11 @@ class FolderLauncher(tk.Tk):
         return "md"
 
     def _on_window_resize(self, event):
-        """ウィンドウリサイズ時のレスポンシブ制御。"""
+        """Handle responsive layout on window resize."""
         if event.widget is not self:
             return
 
-        # ヘッダーバナーを幅 < 400 では非表示にする
+        # Hide header banner when width < 400
         if hasattr(self, "_banner_lbl"):
             try:
                 w = self.winfo_width()
@@ -3350,7 +3395,7 @@ class FolderLauncher(tk.Tk):
             except Exception:
                 pass
 
-        # ブレークポイントが変わった時のみタブ・コンテンツを再描画
+        # Re-render only when the breakpoint changes
         bp = self._width_bp()
         if bp == self._prev_bp:
             return
@@ -3365,7 +3410,7 @@ class FolderLauncher(tk.Tk):
         hdr = tk.Frame(self, bg=C["accent"], height=40)
         hdr.pack(fill="x")
         hdr.pack_propagate(False)
-        # ヘッダー下ボーダー（1px）
+        # 1px border below header
         tk.Frame(self, bg=C["accent_dk"], height=1).pack(fill="x")
 
         self._clock_var = tk.StringVar()
@@ -3498,15 +3543,26 @@ class FolderLauncher(tk.Tk):
         self.bind("<Unmap>", self._on_unmap)
         self.protocol("WM_DELETE_WINDOW", self._on_close)
 
-        # レスポンシブ: ウィンドウサイズ変更を監視
+        # Responsive: monitor window resize
         self.bind("<Configure>", self._on_window_resize)
 
         # tab bar
         self._tab_bar = tk.Frame(self, bg=C["bg"], pady=2)
         self._tab_bar.pack(fill="x")
 
-        # タブバーとコンテンツの間のセパレーターライン
+        # Separator line between tab bar and content
         tk.Frame(self, bg=C["border"], height=1).pack(fill="x")
+
+        # Path bar — packed with side="bottom" before canvas to reserve space
+        self._pathbar_var = tk.StringVar()
+        self._pathbar = tk.Label(
+            self,
+            textvariable=self._pathbar_var,
+            bg=C["bg"], fg=C["text_sub"],
+            font=("Segoe UI", 8),
+            anchor="w", padx=10, pady=2,
+        )
+        self._pathbar.pack(fill="x", side="bottom")
 
         # scrollable list
         wrapper = tk.Frame(self, bg=C["bg"])
@@ -3573,7 +3629,7 @@ class FolderLauncher(tk.Tk):
         for w in self._tab_bar.winfo_children():
             w.destroy()
 
-        # レスポンシブ: ウィンドウ幅に応じてタブ表示数を決定
+        # Responsive: determine visible tab count based on window width
         try:
             win_w = self.winfo_width()
         except Exception:
@@ -3608,7 +3664,7 @@ class FolderLauncher(tk.Tk):
                 activeforeground=C["text"],
             ).pack(side="left")
 
-        # ピル型タブ生成ヘルパー
+        # Pill-style tab builder
         def _pill(parent, text, active, cmd, ctx_cmd=None, side="left"):
             font_val = FONT_BOLD if active else FONT
             bg_act   = C["accent"]
@@ -3616,7 +3672,7 @@ class FolderLauncher(tk.Tk):
             bg_hov   = C["card_h"]
             fg_act   = "white"
             fg_idle  = C["text_sub"]
-            # サイズ測定
+            # Measure widget size
             tmp = tk.Label(parent, text=text, font=font_val, padx=10, pady=4)
             tmp.update_idletasks()
             tw, th = tmp.winfo_reqwidth(), tmp.winfo_reqheight()
@@ -3707,19 +3763,13 @@ class FolderLauncher(tk.Tk):
             )
 
     def _switch_tab(self, idx: int):
-        # stop monitor when leaving Ping tab
-        if self._active == -6 and idx != -6:
-            self._ping_stop()
-        # Grep タブから離れるときに検索をキャンセル
+        # Cancel search when leaving Grep tab
         if self._active == -12 and idx != -12:
             self._grep_cancel = True
         self._active = idx
         self._render_tabs()
         self._update_footer()
         self._render_list()
-        # start monitor when entering Ping tab (if enabled)
-        if idx == -6 and self._ping_enabled:
-            self._ping_start()
         # Start file watcher when entering the Auto tab
         if idx == -9:
             self._ensure_file_watcher()
@@ -3744,12 +3794,6 @@ class FolderLauncher(tk.Tk):
             self._footer_btn2.pack(side="left", fill="x", expand=True, padx=(2, 0))
         elif self._active == -5:
             self._footer_btn.configure(text="Clear All", command=self._clear_clip_history)
-            self._footer_btn2.pack_forget()
-        elif self._active == -6:
-            self._footer_btn.configure(text="+ Add Host", command=self._ping_add_host)
-            self._footer_btn2.pack_forget()
-        elif self._active == -7:
-            self._footer_btn.configure(text="+ Add Memo", command=self._add_memo)
             self._footer_btn2.pack_forget()
         elif self._active == -9:
             self._footer_btn.configure(text="+ Add Rule", command=self._add_rule)
@@ -3925,10 +3969,6 @@ class FolderLauncher(tk.Tk):
             self._render_bookmark_list()
         elif self._active == -5:
             self._render_clip_list()
-        elif self._active == -6:
-            self._render_ping_list()
-        elif self._active == -7:
-            self._render_memo_list()
         elif self._active == -9:
             self._render_rules_list()
         elif self._active == -12:
@@ -3949,19 +3989,47 @@ class FolderLauncher(tk.Tk):
             ).pack(pady=20)
             return
 
-        for i, entry in enumerate(folders):
-            self._make_card(i, entry["name"], entry["path"],
-                            entry.get("type", "folder"))
+        size = self._card_size
+        if size == "large":
+            # large: single-column layout
+            for i, entry in enumerate(folders):
+                self._make_card(i, entry["name"], entry["path"],
+                                entry.get("type", "folder"))
+            return
 
-    def _make_card(self, idx: int, name: str, path: str, item_type: str = "folder"):
+        # compact / normal: responsive grid layout
+        bp = self._width_bp()
+        cols = ({"xs": 1, "sm": 2, "md": 3} if size == "compact"
+                else {"xs": 1, "sm": 1, "md": 2})[bp]
+
+        grid_wrap = tk.Frame(self._list_frame, bg=C["bg"])
+        grid_wrap.pack(fill="x", padx=2, pady=2)
+        for c in range(cols):
+            grid_wrap.columnconfigure(c, weight=1, uniform="card")
+
+        for i, entry in enumerate(folders):
+            r, c = divmod(i, cols)
+            self._make_card(i, entry["name"], entry["path"],
+                            entry.get("type", "folder"),
+                            grid_parent=grid_wrap, grid_pos=(r, c))
+
+    def _make_card(self, idx: int, name: str, path: str, item_type: str = "folder",
+                   grid_parent: tk.Frame | None = None,
+                   grid_pos: tuple[int, int] | None = None):
         size = self._card_size
         pad_y = {"compact": 1, "normal": 4, "large": 8}.get(size, 4)
         pad_x = {"compact": 6, "normal": 8, "large": 12}.get(size, 8)
         name_font = FONT_SMALL if size == "compact" else FONT_BOLD
 
-        outer = tk.Frame(self._list_frame, bg=C["bg"],
-                         highlightthickness=0)
-        outer.pack(fill="x", pady=(1 if size == "compact" else 3), padx=6)
+        in_grid = grid_parent is not None
+        parent = grid_parent if in_grid else self._list_frame
+        outer = tk.Frame(parent, bg=C["bg"], highlightthickness=0)
+        if in_grid:
+            r, c = grid_pos
+            gpad = 1 if size == "compact" else 2
+            outer.grid(row=r, column=c, sticky="nsew", padx=gpad, pady=gpad)
+        else:
+            outer.pack(fill="x", pady=(1 if size == "compact" else 3), padx=6)
         card = tk.Frame(outer, bg=C["card"],
                         pady=pad_y, padx=pad_x, relief="flat", bd=0,
                         highlightthickness=1, highlightbackground=C["border"])
@@ -4027,6 +4095,14 @@ class FolderLauncher(tk.Tk):
 
         _bind_open(card)
 
+        # Show hovered path in the bottom status bar
+        card.bind("<Enter>", lambda e: self._pathbar_var.set(path), add="+")
+        card.bind("<Leave>", lambda e: self._pathbar_var.set(""),   add="+")
+        for child in tuple(card.winfo_children()):
+            if child not in extra_btns:
+                child.bind("<Enter>", lambda e, p=path: self._pathbar_var.set(p), add="+")
+                child.bind("<Leave>", lambda e: self._pathbar_var.set(""),        add="+")
+
     def _card_context_menu(self, event, idx: int, name: str, path: str):
         folders = self._current["folders"]
         menu = tk.Menu(self, tearoff=0,
@@ -4067,7 +4143,7 @@ class FolderLauncher(tk.Tk):
         menu.add_command(label="Remove",
                          command=lambda: self._remove_folder(idx))
 
-        # フォルダのみ: ファイル一覧スキャン
+        # Folder entries only: file list scan
         if os.path.isdir(path):
             menu.add_separator()
             menu.add_command(label="Scan Files",
@@ -4152,13 +4228,12 @@ class FolderLauncher(tk.Tk):
         pane = tk.Frame(self._list_frame, bg=C["bg"])
         pane.pack(fill="both", expand=True)
 
-        # left sidebar (レスポンシブ幅: xs=70 / sm=90 / md=110)
+        # left sidebar (responsive width: xs=70 / sm=90 / md=110)
         _tw = self._width_bp()
         _sidebar_w = 70 if _tw == "xs" else 90 if _tw == "sm" else 110
         sidebar = tk.Frame(pane, bg=C["card"], width=_sidebar_w,
                            highlightthickness=1, highlightbackground=C["border"])
         sidebar.pack(side="left", fill="y", padx=(0, 4))
-        sidebar.pack_propagate(False)
         self._render_group_sidebar(sidebar)
 
         # right main area
@@ -4331,6 +4406,8 @@ class FolderLauncher(tk.Tk):
         """Render group buttons in the left sidebar."""
         self._sidebar_group_btns: dict = {}
 
+        inner = parent
+
         def _select_group(grp: str | None):
             self._selected_group = grp
             self._render_list()
@@ -4339,7 +4416,7 @@ class FolderLauncher(tk.Tk):
             is_active = (self._selected_group == grp)
             bg_c = C["accent"] if is_active else C["card"]
             fg_c = "white" if is_active else C["text_sub"]
-            b = tk.Button(parent, text=label,
+            b = tk.Button(inner, text=label,
                           bg=bg_c, fg=fg_c,
                           relief="flat", bd=0, font=FONT_SMALL,
                           cursor="hand2", anchor="w", padx=6,
@@ -4437,7 +4514,7 @@ class FolderLauncher(tk.Tk):
             b.bind("<ButtonRelease-1>", lambda e, btn=b, g=grp:  on_release(e, btn, g))
 
         # + group add button
-        add_btn = tk.Button(parent, text="+ Add Group",
+        add_btn = tk.Button(inner, text="+ Add Group",
                             command=self._add_terminal_group,
                             bg=C["bg"], fg=C["text_sub"],
                             relief="flat", bd=0, font=FONT_SMALL,
@@ -4558,14 +4635,14 @@ class FolderLauncher(tk.Tk):
 
     def _add_conn(self):
         dlg = ConnectionDialog(self, groups=self._terminal_groups)
-        if dlg.result is None:
+        if not dlg.result:
             return
-        conn = dlg.result
-        self._conns.append(conn)
+        self._conns.extend(dlg.result)
         self._save_conns()
         self._render_list()
-        # connect immediately after adding
-        self._connect_server(conn)
+        # Connect immediately when only one entry was added
+        if len(dlg.result) == 1:
+            self._connect_server(dlg.result[0])
 
     def _remove_conn(self, idx: int):
         name = self._conns[idx]["name"]
@@ -4577,11 +4654,11 @@ class FolderLauncher(tk.Tk):
     def _edit_conn(self, idx: int):
         dlg = ConnectionDialog(self, initial=self._conns[idx],
                                groups=self._terminal_groups)
-        if dlg.result is None:
+        if not dlg.result:
             return
-        # carry over statistics data
+        # Carry over connection statistics
         prev = self._conns[idx]
-        result = dlg.result
+        result = dlg.result[0]
         result["connect_count"] = prev.get("connect_count", 0)
         result["last_connected"] = prev.get("last_connected")
         self._conns[idx] = result
@@ -5062,453 +5139,6 @@ class FolderLauncher(tk.Tk):
                 except Exception:
                     pass
 
-    # ── Ping monitor ──────────────────────────────────────
-
-    def _render_ping_list(self):
-        """Render the Ping monitor UI."""
-        # ── settings bar ──────────────────────────────────────
-        cfg_bar = tk.Frame(self._list_frame, bg=C["bg"])
-        cfg_bar.pack(fill="x", pady=(0, 4))
-
-        tk.Label(cfg_bar, text="Interval:", bg=C["bg"], fg=C["text_sub"],
-                 font=FONT_SMALL).pack(side="left", padx=(2, 2))
-        self._ping_interval_var = tk.StringVar(value=str(self._ping_interval))
-        tk.Entry(cfg_bar, textvariable=self._ping_interval_var,
-                 width=4, font=FONT, bg=C["card"], fg=C["text"],
-                 relief="flat", bd=1, insertbackground=C["accent"],
-                 ).pack(side="left")
-        tk.Label(cfg_bar, text="sec", bg=C["bg"], fg=C["text_sub"],
-                 font=FONT_SMALL).pack(side="left", padx=(2, 8))
-
-        def _apply_interval():
-            try:
-                v = int(self._ping_interval_var.get())
-                if v > 0:
-                    self._ping_interval = v
-                    self._save_config()
-            except ValueError:
-                pass
-
-        tk.Button(cfg_bar, text="Apply", command=_apply_interval,
-                  bg=C["tab_inact"], fg=C["text_sub"], relief="flat", bd=0,
-                  font=FONT_SMALL, cursor="hand2", padx=6, pady=2,
-                  activebackground=C["card_h"],
-                  activeforeground=C["text"]).pack(side="left")
-
-        # ON/OFF toggle button
-        toggle_text = "Stop" if self._ping_running else "Start"
-        toggle_fg   = C["btn_del"] if self._ping_running else C["accent"]
-        tk.Button(cfg_bar, text=toggle_text,
-                  command=self._ping_toggle,
-                  bg=C["tab_inact"], fg=toggle_fg, relief="flat", bd=0,
-                  font=FONT_SMALL, cursor="hand2", padx=8, pady=2,
-                  activebackground=C["card_h"],
-                  activeforeground=toggle_fg).pack(side="left", padx=(6, 0))
-
-        tk.Label(cfg_bar, text=f"{len(self._ping_hosts)} host(s)",
-                 bg=C["bg"], fg=C["text_sub"],
-                 font=FONT_SMALL).pack(side="right", padx=8)
-
-        # ── scrollable area ───────────────────────
-        outer = tk.Frame(self._list_frame, bg=C["bg"])
-        outer.pack(fill="both", expand=True)
-
-        vsb = tk.Scrollbar(outer, orient="vertical")
-        vsb.pack(side="right", fill="y")
-
-        scroll_cv = tk.Canvas(outer, bg=C["bg"],
-                              yscrollcommand=vsb.set,
-                              highlightthickness=0)
-        scroll_cv.pack(side="left", fill="both", expand=True)
-        vsb.configure(command=scroll_cv.yview)
-
-        inner = tk.Frame(scroll_cv, bg=C["bg"])
-        win_id = scroll_cv.create_window(0, 0, anchor="nw", window=inner)
-
-        def _on_inner_cfg(e):
-            scroll_cv.configure(scrollregion=scroll_cv.bbox("all"))
-
-        def _on_cv_cfg(e):
-            scroll_cv.itemconfigure(win_id, width=e.width)
-
-        inner.bind("<Configure>", _on_inner_cfg)
-        scroll_cv.bind("<Configure>", _on_cv_cfg)
-        scroll_cv.bind("<MouseWheel>",
-                       lambda e: scroll_cv.yview_scroll(int(-1*(e.delta/120)), "units"))
-
-        if not self._ping_hosts:
-            tk.Label(inner,
-                     text="Add hosts to monitor\n(use the \"+ Add Host\" button)",
-                     bg=C["bg"], fg=C["text_sub"],
-                     font=FONT_SMALL, justify="center").pack(pady=30)
-            return
-
-        # ── each host row ─────────────────────────────────
-        self._ping_row_canvases = {}
-        self._ping_status_dots  = {}
-        self._ping_stat_labels  = {}
-        bar_area_w = (self._PING_BAR_W + self._PING_BAR_GAP) * self._PING_HISTORY
-
-        for host in self._ping_hosts:
-            row = tk.Frame(inner, bg=C["card"],
-                           highlightthickness=1, highlightbackground=C["border"])
-            row.pack(fill="x", padx=4, pady=2)
-
-            # left: status dot + host name + stats text
-            lbl_frame = tk.Frame(row, bg=C["card"], width=160)
-            lbl_frame.pack(side="left", fill="y")
-            lbl_frame.pack_propagate(False)
-
-            name_row = tk.Frame(lbl_frame, bg=C["card"])
-            name_row.pack(fill="x", padx=6, pady=(10, 0))
-            dot_cv = tk.Canvas(name_row, width=10, height=10,
-                               bg=C["card"], highlightthickness=0)
-            dot_cv.pack(side="left", padx=(0, 4))
-            dot_cv.create_oval(1, 1, 9, 9, fill=C["text_sub"], outline="", tags="dot")
-            self._ping_status_dots[host] = dot_cv
-
-            short = host if len(host) <= 20 else host[:19] + "…"
-            tk.Label(name_row, text=short, bg=C["card"], fg=C["text"],
-                     font=FONT_SMALL, anchor="w").pack(side="left")
-
-            sv = tk.StringVar(value="---")
-            self._ping_stat_vars[host] = sv
-            stat_lbl = tk.Label(lbl_frame, textvariable=sv,
-                                bg=C["card"], fg=C["text_sub"],
-                                font=("Segoe UI", 7), anchor="w")
-            stat_lbl.pack(fill="x", padx=6)
-            self._ping_stat_labels[host] = stat_lbl
-
-            # center: bar chart canvas
-            cv = tk.Canvas(row, bg=C["card"],
-                           width=bar_area_w, height=self._PING_ROW_H,
-                           highlightthickness=0)
-            cv.pack(side="left", padx=(0, 4))
-            self._ping_row_canvases[host] = cv
-
-            # right: delete button
-            def _del(h=host):
-                if h in self._ping_hosts:
-                    self._ping_hosts.remove(h)
-                if h in self._ping_data:
-                    del self._ping_data[h]
-                self._save_config()
-                self._render_list()
-
-            del_btn = tk.Button(row, text="x", command=_del,
-                                bg=C["card"], fg=C["btn_del"],
-                                relief="flat", bd=0, font=("Segoe UI", 11),
-                                cursor="hand2",
-                                activebackground=C["card"],
-                                activeforeground=C["btn_del_h"])
-            del_btn.pack(side="right", padx=(0, 6))
-
-        # initial draw
-        self._ping_redraw()
-
-    def _ping_redraw(self):
-        """Redraw bar charts for all hosts. Must be called from the main thread."""
-        if not hasattr(self, "_ping_row_canvases"):
-            return
-
-        bw      = self._PING_BAR_W
-        bg_gap  = self._PING_BAR_GAP
-        row_h   = self._PING_ROW_H
-        max_ms  = self._PING_MAX_MS
-
-        for host, cv in self._ping_row_canvases.items():
-            cv.delete("all")
-            history = self._ping_data.get(host, [])
-
-            # grid lines
-            for gms in [100, 200, 300]:
-                gy = row_h - int(gms / max_ms * (row_h - 8)) - 4
-                if gy < 2:
-                    continue
-                cv.create_line(0, gy, (bw + bg_gap) * self._PING_HISTORY, gy,
-                               fill=C["border"], dash=(2, 4))
-                cv.create_text(2, gy - 1, text=f"{gms}", anchor="sw",
-                               fill=C["text_sub"], font=("Segoe UI", 6))
-
-            # draw bars
-            for j, ms in enumerate(history):
-                x = j * (bw + bg_gap)
-                if ms is None:
-                    # timeout
-                    cv.create_rectangle(x, 4, x + bw, row_h - 4,
-                                        fill="#CC3344", outline="")
-                    cv.create_text(x + bw // 2, row_h // 2,
-                                   text="TO", fill="white",
-                                   font=("Segoe UI", 6))
-                else:
-                    clipped = min(ms, max_ms)
-                    bh = max(3, int(clipped / max_ms * (row_h - 12)))
-                    color = (C["accent"]    if ms < 100 else
-                             C["accent_dk"] if ms < 200 else
-                             "#DD8844")
-                    cv.create_rectangle(x, row_h - 4 - bh, x + bw, row_h - 4,
-                                        fill=color, outline="")
-                    if bh >= 16:
-                        cv.create_text(x + bw // 2, row_h - 4 - bh // 2,
-                                       text=str(int(ms)), fill="white",
-                                       font=("Segoe UI", 6))
-
-            # update stats text
-            if host in self._ping_stat_vars and history:
-                last = history[-1]
-                vals = [v for v in history if v is not None]
-                if last is None:
-                    stat = "Timeout"
-                elif vals:
-                    avg = sum(vals) / len(vals)
-                    mn  = min(vals)
-                    stat = f"{int(last)}ms  avg {int(avg)}ms  min {int(mn)}ms"
-                else:
-                    stat = f"{int(last)}ms"
-                self._ping_stat_vars[host].set(stat)
-
-                # update status dot and label color (green=OK / red=Timeout)
-                ok = (last is not None)
-                dot_color  = "#44CC77" if ok else "#CC3344"
-                stat_color = "#44CC77" if ok else "#CC4455"
-                if host in self._ping_status_dots:
-                    self._ping_status_dots[host].itemconfigure("dot", fill=dot_color)
-                if host in self._ping_stat_labels:
-                    self._ping_stat_labels[host].configure(fg=stat_color)
-
-    def _ping_add_host(self):
-        """Open the dialog to add a ping host, presenting terminal connections as suggestions."""
-        suggestions = [c["host"] for c in self._conns
-                       if c["host"] not in self._ping_hosts]
-        hint = "Hostname or IP address"
-        if suggestions:
-            hint += f"\nEx: {', '.join(suggestions[:4])}"
-        dlg = InputDialog(self, "Add Ping Host", hint)
-        if dlg.result is None:
-            return
-        host = dlg.result.strip()
-        if not host:
-            return
-        if host in self._ping_hosts:
-            messagebox.showinfo("Info", f"'{host}' is already registered.", parent=self)
-            return
-        self._ping_hosts.append(host)
-        self._ping_data[host] = []
-        self._save_config()
-        self._render_list()
-
-    def _ping_toggle(self):
-        """Toggle the Ping monitor ON/OFF."""
-        if self._ping_running:
-            self._ping_enabled = False
-            self._ping_stop()
-        else:
-            self._ping_enabled = True
-            self._ping_start()
-        self._save_config()
-        self._render_list()
-
-    def _ping_start(self):
-        """Start the Ping monitor."""
-        if self._ping_running:
-            return
-        self._ping_running = True
-        # retain existing data and initialize entries for new hosts
-        for h in self._ping_hosts:
-            self._ping_data.setdefault(h, [])
-        self._ping_schedule_round()
-
-    def _ping_stop(self):
-        """Stop the Ping monitor."""
-        self._ping_running = False
-        if self._ping_next_id is not None:
-            self.after_cancel(self._ping_next_id)
-            self._ping_next_id = None
-        if self._ping_graph_id is not None:
-            self.after_cancel(self._ping_graph_id)
-            self._ping_graph_id = None
-
-    def _ping_schedule_round(self):
-        """Launch the next ping round in a thread."""
-        if not self._ping_running:
-            return
-        threading.Thread(target=self._ping_round, daemon=True).start()
-
-    def _ping_round(self):
-        """Run ping to all hosts in parallel and update the graph when done."""
-        hosts = list(self._ping_hosts)
-        threads = [
-            threading.Thread(target=self._ping_one, args=(h,), daemon=True)
-            for h in hosts
-        ]
-        for t in threads:
-            t.start()
-        for t in threads:
-            t.join(timeout=3.5)
-        if self._ping_running:
-            self.after(0, self._ping_redraw)
-            interval_ms = max(1000, self._ping_interval * 1000)
-            self._ping_next_id = self.after(interval_ms, self._ping_schedule_round)
-
-    def _ping_one(self, host: str):
-        """Run ping to a single host and append the response time to _ping_data."""
-        try:
-            result = subprocess.run(
-                ["ping", "-n", "1", "-w", "2000", host],
-                capture_output=True, text=True, timeout=3.0,
-                creationflags=subprocess.CREATE_NO_WINDOW,
-            )
-            if "TTL=" in result.stdout or "ttl=" in result.stdout:
-                # English: "time=5ms" / "time<1ms", Japanese: "時間 =5ms" / "時間 <1ms"
-                m = re.search(r"(?:[Tt]ime|時間)\s*=\s*(\d+)\s*ms", result.stdout)
-                if m:
-                    ms = float(m.group(1))
-                elif re.search(r"(?:[Tt]ime|時間)\s*<", result.stdout):
-                    ms = 0.5  # treat <1ms as 0.5ms
-                else:
-                    ms = 1.0  # TTL present but time unknown; treat as 1ms
-            else:
-                ms = None
-        except Exception:
-            ms = None
-
-        with self._ping_lock:
-            hist = self._ping_data.setdefault(host, [])
-            hist.append(ms)
-            if len(hist) > self._PING_HISTORY:
-                hist.pop(0)
-
-    # ── Memo pad ──────────────────────────────────────────
-
-    def _render_memo_list(self):
-        """Render memo pad UI."""
-        outer = tk.Frame(self._list_frame, bg=C["bg"])
-        outer.pack(fill="both", expand=True)
-
-        # ── Left pane: title list (レスポンシブ幅: xs=80 / sm=100 / md=130) ──
-        _mw = self._width_bp()
-        _left_w = 80 if _mw == "xs" else 100 if _mw == "sm" else 130
-        left = tk.Frame(outer, bg=C["bg"], width=_left_w)
-        left.pack(side="left", fill="y")
-        left.pack_propagate(False)
-
-        tk.Frame(outer, bg=C["border"], width=1).pack(side="left", fill="y")
-
-        # ── Right pane: edit area ──
-        right = tk.Frame(outer, bg=C["bg"])
-        right.pack(side="left", fill="both", expand=True)
-
-        # Helper to render right pane content
-        def _show_editor(idx: int | None):
-            for w in right.winfo_children():
-                w.destroy()
-            if idx is None or not self._memos:
-                tk.Label(right, text="Select or add a memo",
-                         bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL).pack(pady=20)
-                return
-
-            memo = self._memos[idx]
-
-            # Title input
-            title_var = tk.StringVar(value=memo.get("title", ""))
-            tk.Label(right, text="Title", bg=C["bg"], fg=C["text_sub"],
-                     font=FONT_SMALL, anchor="w").pack(fill="x", padx=10, pady=(8, 0))
-            title_e = tk.Entry(right, textvariable=title_var, font=FONT,
-                               bg=C["card"], fg=C["text"], relief="flat", bd=1,
-                               insertbackground=C["accent"])
-            title_e.pack(fill="x", padx=10, pady=(2, 6))
-
-            # Body text area
-            tk.Label(right, text="Body", bg=C["bg"], fg=C["text_sub"],
-                     font=FONT_SMALL, anchor="w").pack(fill="x", padx=10)
-            body_frame = tk.Frame(right, bg=C["bg"])
-            body_frame.pack(fill="both", expand=True, padx=10, pady=(2, 4))
-            body_txt = tk.Text(body_frame, font=("Consolas", 10),
-                               bg=C["card"], fg=C["text"], relief="flat", bd=1,
-                               insertbackground=C["accent"],
-                               wrap="word", undo=True)
-            body_txt.insert("1.0", memo.get("body", ""))
-            vsb = tk.Scrollbar(body_frame, command=body_txt.yview)
-            body_txt.configure(yscrollcommand=vsb.set)
-            body_txt.pack(side="left", fill="both", expand=True)
-            vsb.pack(side="right", fill="y")
-
-            # Button row
-            btn_row = tk.Frame(right, bg=C["bg"])
-            btn_row.pack(fill="x", padx=10, pady=(0, 8))
-
-            def _save_memo(*_):
-                self._memos[idx]["title"] = title_var.get()
-                self._memos[idx]["body"]  = body_txt.get("1.0", "end-1c")
-                self._save_config()
-                _refresh_list()
-
-            def _copy_body():
-                self.clipboard_clear()
-                self.clipboard_append(body_txt.get("1.0", "end-1c"))
-
-            def _delete_memo():
-                self._memos.pop(idx)
-                self._memo_sel = None
-                self._save_config()
-                self._render_list()
-
-            tk.Button(btn_row, text="Save", command=_save_memo,
-                      bg=C["accent"], fg="white", relief="flat", bd=0,
-                      font=FONT_BOLD, cursor="hand2", padx=10, pady=3,
-                      activebackground=C["accent_dk"], activeforeground="white",
-                      ).pack(side="left")
-            tk.Button(btn_row, text="Copy", command=_copy_body,
-                      bg=C["card"], fg=C["text"], relief="flat", bd=0,
-                      font=FONT, cursor="hand2", padx=10, pady=3,
-                      activebackground=C["card_h"], activeforeground=C["text"],
-                      ).pack(side="left", padx=(6, 0))
-            tk.Button(btn_row, text="Delete", command=_delete_memo,
-                      bg=C["btn_del"], fg="white", relief="flat", bd=0,
-                      font=FONT, cursor="hand2", padx=10, pady=3,
-                      activebackground=C["btn_del_h"], activeforeground="white",
-                      ).pack(side="right")
-
-            # Save on focus out
-            title_e.bind("<FocusOut>", _save_memo)
-            body_txt.bind("<FocusOut>", _save_memo)
-
-        # Helper to refresh left pane list
-        def _refresh_list():
-            for w in left.winfo_children():
-                w.destroy()
-            if not self._memos:
-                tk.Label(left, text="No memos", bg=C["bg"], fg=C["text_sub"],
-                         font=FONT_SMALL).pack(pady=10)
-                return
-            for i, m in enumerate(self._memos):
-                is_sel = (i == self._memo_sel)
-                btn = tk.Button(
-                    left, text=m.get("title") or "(no title)",
-                    bg=C["card_h"] if is_sel else C["bg"],
-                    fg=C["text"], relief="flat", bd=0,
-                    font=FONT_BOLD if is_sel else FONT,
-                    cursor="hand2", anchor="w", padx=8, pady=4,
-                    wraplength=max(40, _left_w - 15), justify="left",
-                    activebackground=C["card_h"], activeforeground=C["text"],
-                )
-                btn.pack(fill="x", pady=1)
-                btn.configure(command=lambda i=i: _select(i))
-
-        def _select(i: int):
-            self._memo_sel = i
-            _refresh_list()
-            _show_editor(i)
-
-        _refresh_list()
-        _show_editor(self._memo_sel)
-
-    def _add_memo(self):
-        self._memos.append({"title": "New Memo", "body": ""})
-        self._memo_sel = len(self._memos) - 1
-        self._save_config()
-        self._render_list()
-
     def _render_bookmark_list(self):
         pane = tk.Frame(self._list_frame, bg=C["bg"])
         pane.pack(fill="both", expand=True)
@@ -5524,7 +5154,6 @@ class FolderLauncher(tk.Tk):
         sidebar = tk.Frame(pane, bg=C["card"], width=110,
                            highlightthickness=1, highlightbackground=C["border"])
         sidebar.pack(side="left", fill="y", padx=(0, 4))
-        sidebar.pack_propagate(False)
         self._render_bm_sidebar(sidebar)
 
         # right main area
@@ -6315,9 +5944,9 @@ class FolderLauncher(tk.Tk):
         tree.column("updated",   width=82,  minwidth=70,  stretch=False)
 
         def _resize_tree_cols(w: int):
-            """ウィジェット幅に応じてTreeviewのカラム表示を切り替える。"""
+            """Switch Treeview columns based on widget width."""
             if w < 340:
-                # xs: Event + Process のみ
+                # xs: Event + Process only
                 tree["displaycolumns"] = ("process",)
                 tree.column("#0",      width=max(60, w // 2), stretch=True)
                 tree.column("process", width=max(60, w // 2), stretch=True)
@@ -6329,7 +5958,7 @@ class FolderLauncher(tk.Tk):
                 tree.column("progress", width=55, stretch=False)
                 tree.column("deadline", width=76, stretch=False)
             else:
-                # md: 全カラム表示
+                # md: all columns visible
                 tree["displaycolumns"] = cols
                 tree.column("#0",        width=100, minwidth=70,  stretch=True)
                 tree.column("process",   width=170, minwidth=70,  stretch=False)
@@ -6344,9 +5973,9 @@ class FolderLauncher(tk.Tk):
         tree.pack(side="left", fill="both", expand=True)
         vsb.pack(side="right", fill="y")
 
-        # ウィジェット幅変化時にカラムを再調整
+        # Re-adjust columns on widget width change
         tree_wrap.bind("<Configure>", lambda e: _resize_tree_cols(e.width))
-        # 初期適用
+        # Apply initial column layout
         try:
             _resize_tree_cols(self.winfo_width())
         except Exception:
@@ -6889,7 +6518,7 @@ class FolderLauncher(tk.Tk):
         self._work_anim_id = self.after(500, self._work_anim_step)
 
     def _active_work_record(self) -> dict | None:
-        """現在の作業中タスク情報を config 保存用の dict として返す。"""
+        """Return the active work info as a dict for config persistence."""
         if self._work_active is None:
             return None
         task = self._tasks[self._work_active["task_idx"]]
@@ -6928,7 +6557,7 @@ class FolderLauncher(tk.Tk):
             "start": start_dt.isoformat(timespec="seconds"),
             "end":   end_dt.isoformat(timespec="seconds"),
         })
-        self._save_config()  # active_work を None にして保存
+        self._save_config()  # save with active_work set to None
         self._render_list()
 
     # ── System tray ───────────────────────────────────────
@@ -6946,11 +6575,11 @@ class FolderLauncher(tk.Tk):
         self._render_list()
 
     def _set_font_size(self, size: int):
-        """フォントサイズを変更してUIを再構築する。"""
+        """Change the font size and rebuild the UI."""
         self._font_size = size
         _update_fonts(size)
         self._save_config()
-        # テーマ変更と同様に全ウィジェットを破棄して再構築
+        # Destroy all widgets and rebuild, similar to a theme change
         if self._tick_id is not None:
             self.after_cancel(self._tick_id)
             self._tick_id = None
@@ -8004,6 +7633,8 @@ def _set_bg(frame: tk.Frame, color: str):
             child.configure(bg=color)
         except Exception:
             pass
+
+
 
 
 def _preload_theme():

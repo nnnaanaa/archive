@@ -71,15 +71,15 @@ ERR      = "\033[38;2;200;80;80m"     # red
 CAT_CLR  = "\033[38;2;196;184;232m"   # category header
 FILE_CLR = "\033[38;2;100;190;150m"   # file type tag
 
-# ── テーマ定義（gem.py と共通のパレット） ─────────────────────
+# ── Theme definitions (shared palette with gem.py) ──────────────
 
 def _h(hex_color: str) -> str:
-    """Hex カラー (#RRGGBB) を ANSI 前景色エスケープに変換する。"""
+    """Convert a hex color (#RRGGBB) to an ANSI foreground escape."""
     c = hex_color.lstrip("#")
     r, g, b = int(c[0:2], 16), int(c[2:4], 16), int(c[4:6], 16)
     return f"\033[38;2;{r};{g};{b}m"
 
-# gem.py の THEMES パレットをそのまま取り込む
+# Import the THEMES palette from gem.py
 _GEM_PALETTES: dict[str, dict[str, str]] = {
     "violet": {
         "accent": "#8B7CC8", "accent_dk": "#6A5BAA", "accent_lt": "#C4B8E8",
@@ -157,7 +157,7 @@ THEMES: dict[str, dict[str, str]] = {
 
 
 def _apply_theme(name: str) -> bool:
-    """グローバルカラー変数を指定テーマで上書きする。"""
+    """Overwrite global color variables with the specified theme."""
     global ACCENT, ACCENT2, HL, TEXT_SUB, CAT_CLR, FILE_CLR
     t = THEMES.get(name)
     if not t:
@@ -319,6 +319,17 @@ def _load_tasks() -> list[dict]:
         return []
 
 
+def _load_bookmarks() -> list[dict]:
+    """Load bookmark categories from config.json."""
+    if not CONFIG_FILE.exists():
+        return []
+    try:
+        cfg = json.loads(CONFIG_FILE.read_text(encoding="utf-8"))
+        return cfg.get("bookmarks", [])
+    except Exception:
+        return []
+
+
 def _all_entries(data: list[dict]) -> list[tuple[str, str, str]]:
     entries = []
     for cat in data:
@@ -338,8 +349,10 @@ def _type_tag(path: str) -> str:
         return f"{ERR}[miss]{R}"
 
 
+
+
 def _wcswidth(s: str) -> int:
-    """文字列の端末表示幅を返す（全角=2, 半角=1）。"""
+    """Return terminal display width of a string (fullwidth=2, halfwidth=1)."""
     w = 0
     for c in s:
         ew = unicodedata.east_asian_width(c)
@@ -348,12 +361,12 @@ def _wcswidth(s: str) -> int:
 
 
 def _trunc_path(path: str, max_cols: int) -> str:
-    """パスの表示幅が max_cols を超える場合、末尾を '...' で省略する。"""
+    """Truncate a path with '...' if its display width exceeds max_cols."""
     if _wcswidth(path) <= max_cols:
         return path
     result = ""
     used = 0
-    ellipsis_w = 3  # "..." の幅
+    ellipsis_w = 3  # display width of "..."
     budget = max_cols - ellipsis_w
     for c in path:
         cw = 2 if unicodedata.east_asian_width(c) in ("W", "F") else 1
@@ -379,24 +392,24 @@ def _open_path(path: str) -> bool:
 
 
 def _getch_nav() -> str:
-    """単一キー入力を受け取り 'up' / 'down' / 'enter' / 'back' / 'quit' / 'menu' を返す。"""
+    """Read a single keypress and return 'up'/'down'/'enter'/'back'/'quit'/'menu'."""
     try:
         import msvcrt
         ch = msvcrt.getch()
-        if ch in (b'\x00', b'\xe0'):   # 特殊キー（矢印など）
+        if ch in (b'\x00', b'\xe0'):   # special key (arrow keys etc.)
             ch2 = msvcrt.getch()
             if ch2 == b'H':
                 return 'up'
             if ch2 == b'P':
                 return 'down'
-            if ch2 == b'M':            # 右矢印キー → パス表示
+            if ch2 == b'M':            # right arrow -> show path
                 return 'menu'
             return 'enter'
-        if ch == b'\x1b':              # Esc → 戻る
+        if ch == b'\x1b':              # Esc -> go back
             return 'back'
-        if ch == b'\x08':              # Backspace → 戻る
+        if ch == b'\x08':              # Backspace -> go back
             return 'back'
-        if ch.lower() in (b'q', b'\x03'):   # q / Ctrl+C → 終了
+        if ch.lower() in (b'q', b'\x03'):   # q / Ctrl+C -> quit
             return 'quit'
         return 'enter'
     except Exception:
@@ -420,7 +433,7 @@ class GemShell(cmd.Cmd):
         self._entries: list[tuple[str, str, str]] = []
         self._watchers: dict[str, "threading.Event"] = {}  # path → stop_event
         self._reload()
-        # テーマ・プロンプトラベルをロードして更新
+        # Load and apply theme and prompt label
         cfg_theme = self._load_cfg_str("theme") or "claude"
         _apply_theme(cfg_theme)
         self._prompt_label = self._load_cfg_str("prompt_label")
@@ -452,6 +465,7 @@ class GemShell(cmd.Cmd):
         self._entries = _all_entries(self._data)
         self._conns = _load_conns()
         self._tasks = _load_tasks()
+        self._bookmarks = _load_bookmarks()
 
     # ── Display helpers ────────────────────────────────────────
 
@@ -496,6 +510,7 @@ class GemShell(cmd.Cmd):
             ("open <#|name>", "open"),
             ("tasks", "tasks"),
             ("connect <#|name>", "terminal"),
+            ("web [<query>]", "browser"),
             ("help", "help"),
             ("exit", "quit"),
         ]
@@ -508,7 +523,7 @@ class GemShell(cmd.Cmd):
             print(f"  {WARN}No entries registered.{R}")
             return
 
-        # フィルタ済みエントリを収集
+        # Collect filtered entries
         filtered: list[tuple[int, str, str, str]] = []
         for idx, (cat, name, path) in enumerate(self._entries, 1):
             if filter_cat and filter_cat.lower() not in cat.lower():
@@ -524,8 +539,8 @@ class GemShell(cmd.Cmd):
         self._interactive_list(filtered)
 
     def _interactive_list(self, filtered: list):
-        """2段階インタラクティストリスト: カテゴリ選択 → アイテム選択。"""
-        # カテゴリごとにアイテムをグループ化（順序保持）
+        """Two-level interactive list: category -> item selection."""
+        # Group items by category (preserve insertion order)
         groups: dict[str, list[tuple]] = {}
         for entry in filtered:
             idx, cat, name, path = entry
@@ -538,9 +553,9 @@ class GemShell(cmd.Cmd):
             term_h = 24
         visible = max(3, term_h - 7)
 
-        # ── レベル1: カテゴリ選択 ──────────────────────────
+        # ── Level 1: category selection ─────────────────────
         def select_category() -> str | None:
-            """カテゴリ一覧を表示し、選択されたカテゴリ名を返す。q で None。"""
+            """Display category list; return selected name or None on q."""
             sel = 0
             top = 0
             n   = len(cats)
@@ -577,9 +592,9 @@ class GemShell(cmd.Cmd):
                 elif key == 'enter':
                     return cats[sel]
 
-        # ── レベル2: アイテム選択 ──────────────────────────
+        # ── Level 2: item selection ──────────────────────────
         def select_item(cat: str) -> bool:
-            """カテゴリ内アイテムを表示。Esc/Backspace でカテゴリに戻る。False=終了。"""
+            """Display items; Esc/Backspace returns to category; False=quit."""
             items     = groups[cat]
             n         = len(items)
             sel       = 0
@@ -611,7 +626,7 @@ class GemShell(cmd.Cmd):
                 if key == 'quit':
                     return False
                 elif key == 'back':
-                    return True   # カテゴリ選択に戻る
+                    return True   # return to category selection
                 elif key == 'up' and sel > 0:
                     sel -= 1
                     if sel < top:
@@ -626,7 +641,7 @@ class GemShell(cmd.Cmd):
                     _, _, name, path = items[sel]
                     _open_path(path)
 
-        # ── メインループ ───────────────────────────────────
+        # ── Main loop ────────────────────────────────────────
         while True:
             cat = select_category()
             if cat is None:
@@ -825,6 +840,24 @@ class GemShell(cmd.Cmd):
                         for line in content.splitlines():
                             print(f"         {DIM}│{R} {TEXT_SUB}{line}{R}")
 
+    def _confirm_and_launch(self, c: dict) -> bool:
+        """Show connection info, ask y/N, then launch if confirmed. Returns True if launched."""
+        proto = c.get("protocol", "SSH")
+        name  = c.get("name", c["host"])
+        host  = c.get("host", "")
+        print(f"\n  {BOLD}{name}{R}  {DIM}[{proto}]  {host}{R}")
+        try:
+            ans = input(f"  {ACCENT2}Connect? [y/N]:{R} ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return False
+        if ans == "y":
+            _launch_connection(c)
+            print(f"  {SUCCESS}Launched.{R}")
+            return True
+        print(f"  {DIM}Cancelled.{R}")
+        return False
+
     def do_connect(self, arg: str):
         """Connect to a terminal.  connect [<#|name>]"""
         if not arg.strip():
@@ -837,9 +870,7 @@ class GemShell(cmd.Cmd):
             idx = int(query) - 1
             if 0 <= idx < len(self._conns):
                 c = self._conns[idx]
-                print(f"  {TEXT_SUB}[{c.get('name', c['host'])}]{R} connecting...")
-                _launch_connection(c)
-                print(f"  {SUCCESS}Launched.{R}")
+                self._confirm_and_launch(c)
             else:
                 print(f"  {ERR}Index {query} out of range (1-{len(self._conns)}){R}")
             return
@@ -855,9 +886,7 @@ class GemShell(cmd.Cmd):
 
         if len(matched) == 1:
             c = matched[0]
-            print(f"  {TEXT_SUB}[{c.get('name', c['host'])}]{R} connecting...")
-            _launch_connection(c)
-            print(f"  {SUCCESS}Launched.{R}")
+            self._confirm_and_launch(c)
             return
 
         print(f"  {WARN}Multiple matches:{R}")
@@ -872,8 +901,7 @@ class GemShell(cmd.Cmd):
             c_idx = int(choice) - 1
             if 0 <= c_idx < len(matched):
                 c = matched[c_idx]
-                _launch_connection(c)
-                print(f"  {SUCCESS}Launched.{R}")
+                self._confirm_and_launch(c)
             else:
                 print(f"  {ERR}Invalid number.{R}")
 
@@ -883,7 +911,7 @@ class GemShell(cmd.Cmd):
             print(f"  {WARN}No connections registered.{R}")
             return
 
-        # グループごとに接続をまとめる（空グループは "(ungrouped)"）
+        # Group connections by group name (empty -> "(ungrouped)")
         groups: dict[str, list[dict]] = {}
         for c in self._conns:
             grp = c.get("group", "") or "(ungrouped)"
@@ -987,7 +1015,7 @@ class GemShell(cmd.Cmd):
                         top += 1
                 elif key == 'enter':
                     c = conns[sel]
-                    _launch_connection(c)
+                    self._confirm_and_launch(c)
 
         while True:
             grp = select_group()
@@ -998,8 +1026,174 @@ class GemShell(cmd.Cmd):
 
         os.system("cls")
 
+    def do_web(self, arg: str):
+        """Open a bookmark in the browser.  web [<query>]"""
+        if not self._bookmarks:
+            print(f"  {WARN}No bookmarks registered.{R}")
+            return
+
+        # Flatten all items with their category for search
+        all_items: list[tuple[str, dict]] = [
+            (cat["category"], item)
+            for cat in self._bookmarks
+            for item in cat.get("items", [])
+        ]
+
+        if arg.strip():
+            q = arg.strip().lower()
+            matched = [
+                (cat, item) for cat, item in all_items
+                if q in item.get("name", "").lower() or q in item.get("url", "").lower()
+            ]
+            if not matched:
+                print(f"  {ERR}No bookmark matching '{arg.strip()}'.{R}")
+                print(f"  {DIM}Hint: run 'web' to browse all bookmarks.{R}")
+                return
+            if len(matched) == 1:
+                cat, item = matched[0]
+                self._open_bookmark(cat, item)
+                return
+            print(f"\n  {WARN}Multiple matches:{R}\n")
+            for i, (cat, item) in enumerate(matched, 1):
+                print(f"  {ACCENT}{i}.{R} {BOLD}{item['name']}{R}  "
+                      f"{DIM}{cat}{R}  {ACCENT2}{item['url']}{R}")
+            try:
+                choice = input(f"\n  {ACCENT2}Enter number (Enter = cancel):{R} ").strip()
+            except (EOFError, KeyboardInterrupt):
+                print()
+                return
+            if choice.isdigit():
+                c_idx = int(choice) - 1
+                if 0 <= c_idx < len(matched):
+                    cat, item = matched[c_idx]
+                    self._open_bookmark(cat, item)
+                else:
+                    print(f"  {ERR}Invalid number.{R}")
+            return
+
+        # Interactive 2-level: category → item
+        self._interactive_web()
+
+    def _open_bookmark(self, category: str, item: dict):
+        """Print bookmark info and open in browser."""
+        import webbrowser
+        name = item.get("name", item["url"])
+        url  = item["url"]
+        print(f"\n  {BOLD}{name}{R}  {DIM}[{category}]{R}")
+        print(f"  {ACCENT2}{url}{R}")
+        try:
+            ans = input(f"  {ACCENT2}Open in browser? [y/N]:{R} ").strip().lower()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            return
+        if ans == "y":
+            webbrowser.open(url)
+            print(f"  {SUCCESS}Opened.{R}")
+        else:
+            print(f"  {DIM}Cancelled.{R}")
+
+    def _interactive_web(self):
+        """2-level interactive browser: category -> bookmark."""
+        all_items: list[tuple[str, dict]] = [
+            (cat["category"], item)
+            for cat in self._bookmarks
+            for item in cat.get("items", [])
+        ]
+        if not all_items:
+            print(f"  {WARN}No bookmarks registered.{R}")
+            return
+
+        # Group by category (preserve order)
+        cat_order: list[str] = []
+        cat_map: dict[str, list[dict]] = {}
+        for cat in self._bookmarks:
+            name = cat["category"]
+            items = cat.get("items", [])
+            if items:
+                cat_order.append(name)
+                cat_map[name] = items
+
+        if not cat_order:
+            print(f"  {WARN}No bookmarks registered.{R}")
+            return
+
+        visible = 12
+
+        def select_category() -> str | None:
+            """Display category list; return selected name or None on q."""
+            cats = cat_order
+            n = len(cats)
+            sel = 0
+            top = 0
+            while True:
+                os.system("cls")
+                print(f"\n  {ACCENT}{BOLD}Web — Select Category{R}\n")
+                end = min(top + visible, n)
+                for i in range(top, end):
+                    bar = f"{ACCENT}▌{R} " if i == sel else "  "
+                    active = BOLD if i == sel else ""
+                    count = len(cat_map[cats[i]])
+                    print(f"  {bar}{active}{cats[i]}{R}  {DIM}({count}){R}")
+                print(f"\n  {DIM}↑↓ move  Enter select  q quit{R}")
+                key = _getch_nav()
+                if key == 'up'   and sel > 0:
+                    sel -= 1
+                    if sel < top:
+                        top -= 1
+                elif key == 'down' and sel < n - 1:
+                    sel += 1
+                    if sel >= top + visible:
+                        top += 1
+                elif key == 'enter':
+                    return cats[sel]
+                elif key in ('quit', 'back'):
+                    return None
+
+        def select_item(cat_name: str) -> bool:
+            """Display items in category; Esc/Backspace returns to category; False=quit."""
+            items = cat_map[cat_name]
+            n = len(items)
+            sel = 0
+            top = 0
+            while True:
+                os.system("cls")
+                print(f"\n  {ACCENT}{BOLD}Web — {cat_name}{R}\n")
+                end = min(top + visible, n)
+                for i in range(top, end):
+                    bar = f"{ACCENT}▌{R} " if i == sel else "  "
+                    active = BOLD if i == sel else ""
+                    item = items[i]
+                    print(f"  {bar}{active}{item.get('name', item['url'])}{R}  "
+                          f"{DIM}{item['url']}{R}")
+                print(f"\n  {DIM}↑↓ move  Enter open  Esc/← back  q quit{R}")
+                key = _getch_nav()
+                if key == 'up'   and sel > 0:
+                    sel -= 1
+                    if sel < top:
+                        top -= 1
+                elif key == 'down' and sel < n - 1:
+                    sel += 1
+                    if sel >= top + visible:
+                        top += 1
+                elif key == 'enter':
+                    self._open_bookmark(cat_name, items[sel])
+                    return True
+                elif key == 'back':
+                    return True  # return to category selection
+                elif key == 'quit':
+                    return False
+
+        while True:
+            cat = select_category()
+            if cat is None:
+                break
+            if not select_item(cat):
+                break
+
+        os.system("cls")
+
     def do_theme(self, arg: str):
-        """テーマを切り替える。  theme [name]"""
+        """Switch theme.  theme [name]"""
         name = arg.strip().lower()
         if not name:
             current = self._load_cfg_str("theme") or "lavender"
@@ -1018,7 +1212,7 @@ class GemShell(cmd.Cmd):
         print(f"  {SUCCESS}Theme changed to '{name}'.{R}")
 
     def do_prompt(self, arg: str):
-        """プロンプトの表示文字を変更する。  prompt [label]"""
+        """Change the prompt label.  prompt [label]"""
         label = arg.strip()
         if not label:
             print(f"  {DIM}current:{R} {ACCENT}{BOLD}{self._prompt_label}{R} {ACCENT2}>{R}")
@@ -1030,7 +1224,7 @@ class GemShell(cmd.Cmd):
         print(f"  {SUCCESS}Prompt changed to '{label}'.{R}")
 
     def _resolve_path(self, query: str) -> tuple[str, str] | None:
-        """クエリ（インデックス/名前/パス）からフォルダの (name, path) を返す。"""
+        """Resolve a query (index/name/path) to a folder (name, path)."""
         if query.isdigit():
             idx = int(query) - 1
             if not (0 <= idx < len(self._entries)):
@@ -1049,12 +1243,12 @@ class GemShell(cmd.Cmd):
         return matched[0]
 
     def do_watch(self, arg: str):
-        """フォルダ変更をバックグラウンドでログ出力する。  watch <#|name|path> [-r]"""
+        """Watch a folder for changes in the background.  watch <#|name|path> [-r]"""
         import threading
 
         tokens = arg.split()
         if not tokens:
-            # 監視中一覧を表示
+            # Show list of watched folders
             if not self._watchers:
                 print(f"  {DIM}No folders being watched.{R}")
             else:
@@ -1131,7 +1325,7 @@ class GemShell(cmd.Cmd):
         print(f"  {SUCCESS}Watching:{R} {name}  {DIM}{rec_label}  use 'unwatch' to stop{R}")
 
     def do_unwatch(self, arg: str):
-        """フォルダ監視を停止する。  unwatch <#|name|path|all>"""
+        """Stop watching a folder.  unwatch <#|name|path|all>"""
         query = arg.strip()
 
         if not self._watchers:
@@ -1149,14 +1343,14 @@ class GemShell(cmd.Cmd):
             print(f"  {WARN}Usage: unwatch <index|name|path|all>{R}")
             return
 
-        # パス解決（直接パスまたはエントリ名）
+        # Resolve path (direct path or entry name)
         if os.path.isdir(query.rstrip("\\/")):
             path = query.rstrip("\\/")
         else:
             q = query.lower()
             matched = [p for p in self._watchers if q in p.lower() or q in os.path.basename(p).lower()]
             if not matched:
-                # エントリ名から解決
+                # Resolve from entry name
                 result = self._resolve_path(query)
                 if result:
                     path = result[1]
@@ -1173,7 +1367,7 @@ class GemShell(cmd.Cmd):
         print(f"  {SUCCESS}Stopped watching:{R} {path}")
 
     def do_gem(self, _):
-        """gem.py を起動、またはトレイのウィンドウを前面に出す。  gem"""
+        """Launch gem.py or bring the tray window to the foreground.  gem"""
         hwnd = ctypes.windll.user32.FindWindowW(None, "Gem")
         if hwnd:
             ctypes.windll.user32.ShowWindow(hwnd, 9)   # SW_RESTORE
@@ -1245,7 +1439,7 @@ class GemShell(cmd.Cmd):
 """)
 
     def do_keytest(self, _):
-        """キーコード確認用。押したキーの16進コードを表示する。Ctrl+C で終了。"""
+        """Key inspector: shows hex codes for pressed keys. Ctrl+C to exit."""
         import msvcrt
         print(f"  {DIM}Press any key (Ctrl+C to exit)...{R}")
         try:
@@ -1283,15 +1477,12 @@ class GemShell(cmd.Cmd):
         pass
 
     def cmdloop(self, intro=None):
-        """stdout.write でカラープロンプトを出力しつつタブ補完も維持するオーバーライド。"""
-        if self.completekey:
-            try:
-                import readline as _rl
-                self._old_completer = _rl.get_completer()
-                _rl.set_completer(self.complete)
-                _rl.parse_and_bind(self.completekey + ": complete")
-            except ImportError:
-                pass
+        """Override cmdloop to print a colored prompt while preserving tab completion."""
+        _rl = readline  # module-level readline (pyreadline3 fallback already applied)
+        if self.completekey and _rl is not None:
+            self._old_completer = _rl.get_completer()
+            _rl.set_completer(self.complete)
+            _rl.parse_and_bind(self.completekey + ": complete")
         try:
             stop = None
             while not stop:
@@ -1311,15 +1502,11 @@ class GemShell(cmd.Cmd):
                 stop = self.postcmd(stop, line)
             self.postloop()
         finally:
-            if self.completekey:
-                try:
-                    import readline as _rl
-                    _rl.set_completer(self._old_completer)
-                except ImportError:
-                    pass
+            if self.completekey and _rl is not None:
+                _rl.set_completer(self._old_completer)
 
     def _print_wip_tasks(self):
-        """StartWork で実行中のタスクを起動時に表示する。"""
+        """Display the currently active task (started via StartWork) at startup."""
         if not CONFIG_FILE.exists():
             return
         try:
@@ -1330,7 +1517,7 @@ class GemShell(cmd.Cmd):
         if not aw:
             return
 
-        # active_work に対応するタスクを event+process で検索
+        # Find the task matching active_work by event+process
         t = next(
             (x for x in self._tasks
              if x.get("event") == aw.get("event") and x.get("process") == aw.get("process")),
@@ -1340,7 +1527,7 @@ class GemShell(cmd.Cmd):
         event = aw.get("event", "")
         start_str = aw.get("start", "")
 
-        # 経過時間
+        # Elapsed time
         elapsed_part = ""
         if start_str:
             try:
@@ -1351,7 +1538,7 @@ class GemShell(cmd.Cmd):
             except ValueError:
                 pass
 
-        # 進捗バー（タスクが見つかった場合）
+        # Progress bar (only when the matching task is found)
         bar_part = ""
         dl_part  = ""
         if t:
