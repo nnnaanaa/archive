@@ -1,0 +1,83 @@
+; ============================================================
+; 1. 環境設定
+; ============================================================
+LOG_FILE    = 'P:\teraterm\command_result.log'
+
+JUMP_HOST   = '10.0.0.25'
+JUMP_USER   = 'root'
+JUMP_PASS   = 'nanahira'
+
+TARGET_IP   = '10.0.0.21'
+TARGET_USER = 'nanahira'
+TARGET_PASS = 'nanahira'
+
+; --- メニューの設定 ---
+strdim COMMAND_LIST 3
+COMMAND_LIST[0] = 'ip a'
+COMMAND_LIST[1] = 'df -h'
+COMMAND_LIST[2] = 'uptime'
+
+listbox '実行するコマンドを選択してください' 'Command Menu' COMMAND_LIST
+if result == -1 then
+    end
+endif
+SELECTED_CMD = COMMAND_LIST[result]
+
+; ============================================================
+; 2. 接続処理
+; ============================================================
+COMMAND = JUMP_HOST
+strconcat COMMAND ':22 /ssh /2 /auth=password /user='
+strconcat COMMAND JUMP_USER
+strconcat COMMAND ' /passwd='
+strconcat COMMAND JUMP_PASS
+
+connect COMMAND
+if result <> 2 then
+    messagebox '接続に失敗しました。' 'Error'
+    end
+endif
+
+timeout = 10
+wait '#' '$' '>'
+
+sendln 'ssh ' TARGET_USER '@' TARGET_IP
+wait 'password:'
+sendln TARGET_PASS
+wait '#' '$' '>'
+
+; ============================================================
+; 3. ログ記録とコマンド実行（バッファ洗浄Ver.）
+; ============================================================
+
+; 既存ログのリセット
+logclose
+filedelete LOG_FILE
+
+; ★重要：logopenの「直前」に受信バッファを空にする
+; これにより、古い「uptime」という文字情報がログに混入するのを防ぎます
+flushrecv
+
+; ログ開始
+logopen LOG_FILE 0 0
+
+; プロンプトの末尾から記録を開始させるため、少しだけ待機（0.1〜0.5秒程度）
+mpause 200
+
+; コマンド送信
+sendln SELECTED_CMD
+
+; 完了待機
+wait '#' '$' '>'
+
+; ログを閉じる
+pause 1
+logclose
+
+; ============================================================
+; 4. 終了処理
+; ============================================================
+sprintf2 msg '%s の実行結果を保存しました。' SELECTED_CMD
+messagebox msg 'Success'
+
+end
