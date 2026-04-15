@@ -1,8 +1,8 @@
 ; ============================================================
-; 1. 環境設定
+; 1. 環境設定と変数宣言
 ; ============================================================
-CMD_FILE    = 'P:\teraterm\commands.txt'       ; コマンド定義ファイル
-LOG_FILE    = 'P:\teraterm\command_result.log' ; 出力ログファイル
+CMD_FILE    = 'P:\teraterm\commands.txt'
+LOG_DIR     = 'P:\teraterm\'
 
 JUMP_HOST   = '10.0.0.25'
 JUMP_USER   = 'root'
@@ -12,52 +12,15 @@ TARGET_IP   = '10.0.0.21'
 TARGET_USER = 'nanahira'
 TARGET_PASS = 'nanahira'
 
-; ============================================================
-; 2. 定義ファイルの読み込み
-; ============================================================
-fileopen fhandle CMD_FILE 0
-if fhandle == -1 then
-    messagebox 'コマンド定義ファイルが見つかりません。' 'Error'
-    end
-endif
-
-strdim COMMAND_LIST 20 
-count = 0
-
-:loop_file
-filereadln fhandle line
-if result then
-    goto close_file
-endif
-
-strlen line
-if result > 0 then
-    COMMAND_LIST[count] = line
-    count = count + 1
-endif
-
-if count < 20 goto loop_file
-
-:close_file
-fileclose fhandle
-
-if count == 0 then
-    messagebox '実行可能なコマンドが登録されていません。' 'Error'
-    end
-endif
+; --- 宣言と初期化 (Error 9/40 対策) ---
+strdim COMMAND_LIST 21
+SELECTED_CMD = ''
+STR_CMD = ''
+TIMESTAMP = ''
+LOG_FILE = ''
 
 ; ============================================================
-; 3. メニュー表示
-; ============================================================
-listbox '実行するコマンドを選択してください' 'External Command Menu' COMMAND_LIST
-
-if result == -1 then
-    end
-endif
-SELECTED_CMD = COMMAND_LIST[result]
-
-; ============================================================
-; 4. 接続処理
+; 2. 接続処理
 ; ============================================================
 COMMAND = JUMP_HOST
 strconcat COMMAND ':22 /ssh /2 /auth=password /user='
@@ -80,33 +43,94 @@ sendln TARGET_PASS
 wait '#' '$' '>'
 
 ; ============================================================
-; 5. ログ記録とコマンド実行
+; 3. メインループの起点 (Error 205 対策)
 ; ============================================================
+:main_menu
+
+fileopen fhandle CMD_FILE 0
+if fhandle == -1 then
+    messagebox '定義ファイルが見つかりません。' 'Error'
+    goto do_exit
+endif
+
+count = 0
+:loop_file
+filereadln fhandle line
+if result then
+    goto close_file
+endif
+strlen line
+if result > 0 then
+    COMMAND_LIST[count] = line
+    count = count + 1
+endif
+if count < 20 goto loop_file
+
+:close_file
+fileclose fhandle
+COMMAND_LIST[count] = '[EXIT] マクロを終了'
+
+listbox '実行するコマンドを選択してください' 'Command Menu' COMMAND_LIST
+if result == -1 goto do_exit
+if result == count goto do_exit
+
+; --- ここで変数を確実にセットする ---
+SELECTED_CMD = COMMAND_LIST[result]
+STR_CMD = SELECTED_CMD
+
+; ============================================================
+; 4. ログ記録とコマンド実行
+; ============================================================
+gettime TIMESTAMP "%Y%m%d%H%M%S"
+
+; --- 記号置換処理 (スラッシュが複数あってもOKなループ) ---
+:replace_slash
+strreplace STR_CMD 1 "/" "_"
+if result != 0 goto replace_slash
+
+:replace_space
+strreplace STR_CMD 1 " " "_"
+if result != 0 goto replace_space
+
+LOG_FILE = LOG_DIR
+strconcat LOG_FILE TIMESTAMP
+strconcat LOG_FILE "_"
+strconcat LOG_FILE STR_CMD
+strconcat LOG_FILE ".log"
+
 logclose
-filedelete LOG_FILE
-
 flushrecv
-logopen LOG_FILE 0 0
-mpause 200
+pause 1
 
+; ログ開始
+logopen LOG_FILE 0 0
+mpause 500
+
+; ★1行目にプロンプトを入れるための「空改行」
+sendln ""
+wait '#' '$' '>'
+
+; 本命のコマンド実行
 sendln SELECTED_CMD
 
+; 出力完了まで待機
+timeout = 30
 wait '#' '$' '>'
 
-pause 1
+; 最後のプロンプトを書き込ませるための猶予
+mpause 500
 logclose
+pause 1
+
+goto main_menu
 
 ; ============================================================
-; 6. 終了処理（順次ログアウトしてTera Termを閉じる）
+; 5. 終了処理
 ; ============================================================
-; 1. ターゲットサーバからログアウト
+:do_exit
+logclose
 sendln 'exit'
 wait '#' '$' '>'
-
-; 2. 踏み台サーバからログアウト
 sendln 'exit'
-
-; 3. Tera Term自体を終了させる
 closett
-
 end
