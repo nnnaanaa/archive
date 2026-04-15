@@ -1,0 +1,5 @@
+ip a
+df -h
+uptime
+whoami
+ls -la /var/log
