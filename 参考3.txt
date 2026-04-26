@@ -1,0 +1,73 @@
+; --- 1. 接続設定 ---
+HOST_IP   = '10.0.0.25'
+USER_NAME = 'root'
+PASS_WORD = 'nanahira'
+CMD_DIR   = 'P:\teraterm\command'
+
+; --- 2. サーバへ接続 ---
+COMMAND = HOST_IP
+strconcat COMMAND ':22 /ssh /2 /auth=password /user='
+strconcat COMMAND USER_NAME
+strconcat COMMAND ' /passwd='
+strconcat COMMAND PASS_WORD
+
+connect COMMAND
+wait '$' '#' '>'
+
+; --- 3. コマンドファイル一覧の取得 ---
+setdir CMD_DIR
+filesearch '/*.txt' ; .txtファイルを検索（拡張子は適宜変更してください）
+
+; ファイルリストを作成（最大9個まで。TTLのlistbox制限に合わせるのが一般的）
+strdim file_list 10
+i = 0
+
+findfirst fhandle '*.txt' filename
+while result
+    file_list[i] = filename
+    i = i + 1
+    if i >= 10 break ; リストが多すぎると表示できないため制限
+    findnext fhandle filename
+endwhile
+findclose fhandle
+
+; --- 4. listboxでファイルを選択 ---
+listbox '実行するファイルを選択してください' 'コマンド選択' file_list
+
+; キャンセル（result = -1）された場合は終了
+if result == -1 then
+    end
+endif
+
+; 選択されたファイル名を取得
+selected_index = result
+CMD_FILE = file_list[selected_index]
+
+; --- 5. ファイル読み込みと実行（20行ずつ） ---
+fileopen fhandle CMD_FILE 0
+if fhandle == -1 then
+    messagebox 'ファイルを開けませんでした。' 'Error'
+    end
+endif
+
+count = 0
+:loop
+filereadln fhandle line
+if result == 1 goto fclose
+
+strlen line
+if result > 0 then
+    sendln line
+    wait '$' '#' '>'
+    
+    count = count + 1
+    if count == 20 then
+        messagebox '20行送信しました。続けて送信しますか？' '一時停止'
+        count = 0
+    endif
+endif
+goto loop
+
+:fclose
+fileclose fhandle
+messagebox '全コマンドの送信が完了しました。' '完了'
