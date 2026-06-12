@@ -27,6 +27,12 @@ from pathlib import Path
 from PIL import ImageGrab, Image
 import pystray
 
+try:
+    # optional: Explorer drag&drop support (pip install tkinterdnd2)
+    from tkinterdnd2 import TkinterDnD, DND_FILES
+except ImportError:
+    TkinterDnD, DND_FILES = None, None
+
 # When frozen with cx_Freeze, use the parent of sys.executable as base
 _BASE_DIR = Path(sys.executable).parent if getattr(sys, "frozen", False) else Path(__file__).parent
 
@@ -156,6 +162,27 @@ THEMES: dict[str, dict] = {
         "tab_act": "#F5F2FF", "tab_inact": "#E0DAF8",
         "btn_del": "#C88AB8", "btn_del_h": "#A86898",
     },
+    "cyber": {   # near-black blue + neon cyan
+        "bg": "#0A0E16", "card": "#0F1620", "card_h": "#15202E",
+        "accent": "#00C2E0", "accent_dk": "#0094AC", "accent_lt": "#46DCF5",
+        "text": "#D8F4FF", "text_sub": "#6FA8C0", "border": "#1C3A4A",
+        "tab_act": "#0F1620", "tab_inact": "#0C1118",
+        "btn_del": "#B03060", "btn_del_h": "#E04880",
+    },
+    "synthwave": {   # deep violet night + neon magenta
+        "bg": "#16102A", "card": "#1E1638", "card_h": "#2A1E4C",
+        "accent": "#E83E9C", "accent_dk": "#B82578", "accent_lt": "#F570BE",
+        "text": "#F2E6FF", "text_sub": "#A98CC8", "border": "#3C2A60",
+        "tab_act": "#1E1638", "tab_inact": "#181230",
+        "btn_del": "#8B3A5A", "btn_del_h": "#C04878",
+    },
+    "matrix": {   # black + terminal green
+        "bg": "#060A06", "card": "#0C140C", "card_h": "#142014",
+        "accent": "#22CC55", "accent_dk": "#189940", "accent_lt": "#55E882",
+        "text": "#CCF5D6", "text_sub": "#5FA873", "border": "#1A3A22",
+        "tab_act": "#0C140C", "tab_inact": "#080F08",
+        "btn_del": "#A03838", "btn_del_h": "#CC4848",
+    },
 }
 
 ICON_PALETTES: dict[str, dict] = {
@@ -249,6 +276,24 @@ ICON_PALETTES: dict[str, dict] = {
         "MD":  (144, 136, 190, 255), "DK": (104,  96, 160, 255),
         "SP":  (210, 205, 238, 210),
     },
+    "cyber": {
+        "BDR": (  5,  35,  48, 255), "HL": (140, 235, 250, 255),
+        "LT":  ( 70, 220, 245, 255), "F":  (  0, 194, 224, 255),
+        "MD":  (  0, 148, 172, 255), "DK": (  0,  90, 110, 255),
+        "SP":  (160, 240, 252, 200),
+    },
+    "synthwave": {
+        "BDR": ( 60,  15,  45, 255), "HL": (250, 160, 215, 255),
+        "LT":  (245, 112, 190, 255), "F":  (232,  62, 156, 255),
+        "MD":  (184,  37, 120, 255), "DK": (110,  20,  75, 255),
+        "SP":  (250, 170, 220, 200),
+    },
+    "matrix": {
+        "BDR": (  8,  40,  16, 255), "HL": (150, 245, 180, 255),
+        "LT":  ( 85, 232, 130, 255), "F":  ( 34, 204,  85, 255),
+        "MD":  ( 24, 153,  64, 255), "DK": ( 12,  90,  40, 255),
+        "SP":  (160, 245, 190, 200),
+    },
 }
 
 # ── Font hierarchy ───────────────────────────────────────
@@ -264,15 +309,23 @@ FONT_TINY       = ("Segoe UI", 8)             # hints, dense sub-labels
 FONT_MONO       = ("Consolas", 10)            # clock, logs, command text
 
 
-def _update_fonts(size: int):
-    """Update global fonts to match the base size (keeps the scale consistent)."""
-    global FONT_BASE, FONT, FONT_BOLD, FONT_SMALL, FONT_SMALL_BOLD, FONT_TINY, FONT_MONO
+FONT_FAMILY = "Segoe UI"   # configurable UI font family
+
+
+def _update_fonts(size: int, family: str | None = None):
+    """Update global fonts to match the base size and family
+    (keeps the scale consistent)."""
+    global FONT_BASE, FONT_FAMILY, FONT, FONT_BOLD, FONT_SMALL, \
+        FONT_SMALL_BOLD, FONT_TINY, FONT_MONO
+    if family:
+        FONT_FAMILY = family
+    fam = FONT_FAMILY
     FONT_BASE       = size
-    FONT            = ("Segoe UI", size)
-    FONT_BOLD       = ("Segoe UI", size, "bold")
-    FONT_SMALL      = ("Segoe UI", max(7, size - 2))
-    FONT_SMALL_BOLD = ("Segoe UI", max(7, size - 2), "bold")
-    FONT_TINY       = ("Segoe UI", max(7, size - 3))
+    FONT            = (fam, size)
+    FONT_BOLD       = (fam, size, "bold")
+    FONT_SMALL      = (fam, max(7, size - 2))
+    FONT_SMALL_BOLD = (fam, max(7, size - 2), "bold")
+    FONT_TINY       = (fam, max(7, size - 3))
     FONT_MONO       = ("Consolas", max(8, size - 1))
 
 
@@ -289,6 +342,53 @@ def _fmt_duration(seconds: float) -> str:
     if h:
         return f"{h}h {m:02d}m"
     return f"{m}m"
+
+
+def _fuzzy_score(query: str, text: str) -> int | None:
+    """Rank text against query for the command palette.
+
+    Lower is better; None = no match. Each query word must match as a
+    prefix (best), substring, or in-order subsequence (worst).
+    """
+    q = query.lower().strip()
+    if not q:
+        return 1000
+    t = text.lower()
+    total = 0
+    for word in q.split():
+        pos = t.find(word)
+        if pos == 0:
+            continue
+        if pos > 0:
+            total += 10 + min(pos, 80)
+            continue
+        p = 0
+        for ch in word:
+            p = t.find(ch, p)
+            if p < 0:
+                return None
+            p += 1
+        total += 200
+    return total
+
+
+def _log_task_progress(task: dict, new_pct: int, created: bool = False):
+    """Record a day-level progress change on the task.
+
+    Call BEFORE updating task["progress"] so the previous value is captured.
+    One entry per day: repeated changes on the same day keep the first
+    'from' and the final 'to' (the day's net change). from=None marks
+    task creation.
+    """
+    prev = None if created else task.get("progress", 0)
+    if not created and prev == new_pct:
+        return
+    today = datetime.date.today().isoformat()
+    log = task.setdefault("progress_log", [])
+    if log and log[-1].get("date") == today:
+        log[-1]["to"] = new_pct
+    else:
+        log.append({"date": today, "from": prev, "to": new_pct})
 
 
 def _draw_rounded_rect(canvas, x1, y1, x2, y2, r, **kw):
@@ -593,7 +693,39 @@ def _setup_taskbar_icon(root: tk.Tk, palette: dict | None = None,
         root.after(200, _apply)
 
 
-# Monkey-patch to automatically apply the icon when a Toplevel is created
+def _apply_titlebar_theme(win) -> None:
+    """Color the native title bar / window border to match the theme.
+
+    Uses DWM attributes available on Windows 11 (caption color 35, caption
+    text color 36, border color 34); silently no-ops on older Windows and
+    on frameless (overrideredirect) windows.
+    """
+    try:
+        hwnd = ctypes.windll.user32.GetParent(win.winfo_id())
+        if not hwnd:
+            return
+
+        def cref(hex_color: str) -> int:   # "#RRGGBB" -> COLORREF (0x00BBGGRR)
+            r = int(hex_color[1:3], 16)
+            g = int(hex_color[3:5], 16)
+            b = int(hex_color[5:7], 16)
+            return (b << 16) | (g << 8) | r
+
+        dwm = ctypes.windll.dwmapi
+        dwm.DwmSetWindowAttribute.argtypes = [
+            wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
+        for attr, val in ((35, cref(C["accent"])),       # DWMWA_CAPTION_COLOR
+                          (36, cref("#FFFFFF")),         # DWMWA_TEXT_COLOR
+                          (34, cref(C["accent_dk"]))):   # DWMWA_BORDER_COLOR
+            v = wintypes.DWORD(val)
+            dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v),
+                                      ctypes.sizeof(v))
+    except Exception:
+        pass
+
+
+# Monkey-patch to automatically apply the icon and themed title bar
+# when a Toplevel is created
 _orig_toplevel_init = tk.Toplevel.__init__
 
 def _patched_toplevel_init(self, master=None, **kwargs):
@@ -603,6 +735,11 @@ def _patched_toplevel_init(self, master=None, **kwargs):
             self.wm_iconbitmap(_gem_ico_path)
         except Exception:
             pass
+    try:
+        # deferred: the WM frame window exists only after mapping
+        self.after(20, lambda: _apply_titlebar_theme(self))
+    except Exception:
+        pass
 
 tk.Toplevel.__init__ = _patched_toplevel_init
 
@@ -624,8 +761,8 @@ def _get_monitors() -> list[dict]:
         return 1
 
     PROC = ctypes.WINFUNCTYPE(
-        ctypes.c_bool, ctypes.c_ulong, ctypes.c_ulong,
-        ctypes.POINTER(wintypes.RECT), ctypes.c_double,
+        wintypes.BOOL, wintypes.HMONITOR, wintypes.HDC,
+        ctypes.POINTER(wintypes.RECT), wintypes.LPARAM,
     )
     ctypes.windll.user32.EnumDisplayMonitors(0, 0, PROC(callback), 0)
     return monitors
@@ -1517,71 +1654,125 @@ class SubtaskDialog(tk.Toplevel):
         self.destroy()
 
 
-# ── MJPEG AVI builder ─────────────────────────────────────
+# ── MJPEG AVI writer ──────────────────────────────────────
 
-def _build_mjpeg_avi(frames: list[bytes], fps: int, width: int, height: int) -> bytes:
-    """Generate MJPEG AVI bytes from a list of JPEG frames."""
-    n = len(frames)
-    if n == 0:
-        return b""
+def _avi_chunk(fourcc: bytes, data: bytes) -> bytes:
+    if len(data) % 2:
+        data += b"\x00"
+    return fourcc + struct.pack("<I", len(data)) + data
 
-    def _chunk(fourcc: bytes, data: bytes) -> bytes:
-        if len(data) % 2:
-            data += b"\x00"
-        return fourcc + struct.pack("<I", len(data)) + data
 
-    def _list(fourcc: bytes, data: bytes) -> bytes:
-        return b"LIST" + struct.pack("<I", 4 + len(data)) + fourcc + data
+def _avi_list(fourcc: bytes, data: bytes) -> bytes:
+    return b"LIST" + struct.pack("<I", 4 + len(data)) + fourcc + data
 
-    frame_chunks = [_chunk(b"00dc", f) for f in frames]
 
-    # idx1 — frame offset index
-    offset = 4  # immediately after the 'movi' FOURCC
-    idx_data = b""
-    for fc in frame_chunks:
-        idx_data += b"00dc" + struct.pack("<III", 0x10, offset, len(fc) - 8)
-        offset += len(fc)
+class _MjpegAviWriter:
+    """Incremental MJPEG AVI writer.
 
-    movi = _list(b"movi", b"".join(frame_chunks))
+    Frames are appended to a temp file as they are captured, so a long
+    recording keeps only the per-frame sizes in memory instead of every
+    JPEG (30 min of full-screen frames can be several GB). Call finalize()
+    to assemble the playable AVI, or abort() to discard the temp file.
+    """
 
-    # strf: BITMAPINFOHEADER (40 bytes)
-    strf_data = (
-        struct.pack("<IiiHH", 40, width, height, 1, 24)  # biSize/biWidth/biHeight/biPlanes/biBitCount
-        + b"MJPG"                                         # biCompression
-        + struct.pack("<i", width * height * 3)           # biSizeImage
-        + struct.pack("<iiII", 0, 0, 0, 0)               # xPPM/yPPM/clrUsed/clrImportant
-    )
+    def __init__(self):
+        self._tmp = tempfile.NamedTemporaryFile(suffix=".mjpeg", delete=False)
+        self._sizes: list[int] = []   # full '00dc' chunk sizes (header + padded data)
+        self.width  = 0
+        self.height = 0
 
-    # strh: AVISTREAMHEADER (60 bytes data)
-    max_f = max(len(f) for f in frames)
-    strh_data = (
-        b"vids" + b"MJPG"
-        + struct.pack("<I", 0)              # dwFlags
-        + struct.pack("<HH", 0, 0)          # wPriority, wLanguage
-        + struct.pack("<I", 0)              # dwInitialFrames
-        + struct.pack("<II", 1, fps)        # dwScale, dwRate
-        + struct.pack("<II", 0, n)          # dwStart, dwLength
-        + struct.pack("<I", max_f)          # dwSuggestedBufferSize
-        + struct.pack("<i", -1)             # dwQuality (-1 = default)
-        + struct.pack("<I", 0)              # dwSampleSize
-        + struct.pack("<hhhh", 0, 0, width, height)  # rcFrame
-    )
+    @property
+    def frame_count(self) -> int:
+        return len(self._sizes)
 
-    strl = _list(b"strl", _chunk(b"strh", strh_data) + _chunk(b"strf", strf_data))
+    def add_frame(self, jpeg: bytes):
+        if not self._sizes:
+            # frame dimensions come from the first frame
+            from PIL import Image
+            with Image.open(io.BytesIO(jpeg)) as im:
+                self.width, self.height = im.size
+        chunk = _avi_chunk(b"00dc", jpeg)
+        self._tmp.write(chunk)
+        self._sizes.append(len(chunk))
 
-    # avih: AVIMAINHEADER (56 bytes data)
-    avih_data = (
-        struct.pack("<IIIIIIIIII",
-            1000000 // fps, max_f * fps, 0, 0x10,  # microSecPerFrame, maxBytesPerSec, padding, flags
-            n, 0, 1, max_f, width, height,         # totalFrames, initialFrames, streams, bufSize, W, H
+    def abort(self):
+        """Discard the recording and remove the temp file."""
+        try:
+            self._tmp.close()
+            os.unlink(self._tmp.name)
+        except OSError:
+            pass
+
+    def finalize(self, out_path: Path, fps: int):
+        """Assemble the AVI at out_path by streaming the buffered frames."""
+        n = len(self._sizes)
+        if n == 0:
+            self.abort()
+            return
+        self._tmp.flush()
+
+        width, height = self.width, self.height
+        max_f = max(self._sizes) - 8
+
+        # idx1 — frame offset index (offsets relative to just after 'movi')
+        offset = 4
+        idx_parts = []
+        for sz in self._sizes:
+            idx_parts.append(b"00dc" + struct.pack("<III", 0x10, offset, sz - 8))
+            offset += sz
+        idx1 = _avi_chunk(b"idx1", b"".join(idx_parts))
+
+        # strf: BITMAPINFOHEADER (40 bytes)
+        strf_data = (
+            struct.pack("<IiiHH", 40, width, height, 1, 24)  # biSize/biWidth/biHeight/biPlanes/biBitCount
+            + b"MJPG"                                         # biCompression
+            + struct.pack("<i", width * height * 3)           # biSizeImage
+            + struct.pack("<iiII", 0, 0, 0, 0)               # xPPM/yPPM/clrUsed/clrImportant
         )
-        + struct.pack("<IIII", 0, 0, 0, 0)         # dwReserved[4]
-    )
 
-    hdrl = _list(b"hdrl", _chunk(b"avih", avih_data) + strl)
-    idx1 = _chunk(b"idx1", idx_data)
-    riff_data = b"AVI " + hdrl + movi + idx1
-    return b"RIFF" + struct.pack("<I", len(riff_data)) + riff_data
+        # strh: AVISTREAMHEADER (60 bytes data)
+        strh_data = (
+            b"vids" + b"MJPG"
+            + struct.pack("<I", 0)              # dwFlags
+            + struct.pack("<HH", 0, 0)          # wPriority, wLanguage
+            + struct.pack("<I", 0)              # dwInitialFrames
+            + struct.pack("<II", 1, fps)        # dwScale, dwRate
+            + struct.pack("<II", 0, n)          # dwStart, dwLength
+            + struct.pack("<I", max_f)          # dwSuggestedBufferSize
+            + struct.pack("<i", -1)             # dwQuality (-1 = default)
+            + struct.pack("<I", 0)              # dwSampleSize
+            + struct.pack("<hhhh", 0, 0, width, height)  # rcFrame
+        )
+
+        strl = _avi_list(b"strl", _avi_chunk(b"strh", strh_data)
+                         + _avi_chunk(b"strf", strf_data))
+
+        # avih: AVIMAINHEADER (56 bytes data)
+        avih_data = (
+            struct.pack("<IIIIIIIIII",
+                1000000 // fps, max_f * fps, 0, 0x10,  # microSecPerFrame, maxBytesPerSec, padding, flags
+                n, 0, 1, max_f, width, height,         # totalFrames, initialFrames, streams, bufSize, W, H
+            )
+            + struct.pack("<IIII", 0, 0, 0, 0)         # dwReserved[4]
+        )
+
+        hdrl = _avi_list(b"hdrl", _avi_chunk(b"avih", avih_data) + strl)
+
+        movi_size = 4 + sum(self._sizes)   # 'movi' fourcc + frame chunks
+        riff_size = 4 + len(hdrl) + 8 + movi_size + len(idx1)
+
+        import shutil
+        with open(out_path, "wb") as out:
+            out.write(b"RIFF" + struct.pack("<I", riff_size) + b"AVI " + hdrl)
+            out.write(b"LIST" + struct.pack("<I", movi_size) + b"movi")
+            self._tmp.seek(0)
+            shutil.copyfileobj(self._tmp, out)
+            out.write(idx1)
+        self._tmp.close()
+        try:
+            os.unlink(self._tmp.name)
+        except OSError:
+            pass
 
 
 # ── Recording window ───────────────────────────────────────
@@ -1606,7 +1797,7 @@ class RecordingWindow(tk.Toplevel):
 
         self._recording  = False
         self._stop_event = threading.Event()
-        self._frames: list[bytes] = []
+        self._writer: _MjpegAviWriter | None = None
         self._lock       = threading.Lock()
         self._timer_id   = None
         self._elapsed    = 0
@@ -1738,7 +1929,9 @@ class RecordingWindow(tk.Toplevel):
             self._bbox = (m["left"], m["top"], m["right"], m["bottom"])
 
         with self._lock:
-            self._frames.clear()
+            if self._writer is not None:
+                self._writer.abort()
+            self._writer = _MjpegAviWriter()
         self._stop_event.clear()
         self._elapsed = 0
         self._recording = True
@@ -1778,8 +1971,10 @@ class RecordingWindow(tk.Toplevel):
                 jpeg = buf.getvalue()
 
                 with self._lock:
-                    self._frames.append(jpeg)
-                    count = len(self._frames)
+                    if self._writer is None:
+                        break
+                    self._writer.add_frame(jpeg)
+                    count = self._writer.frame_count
 
                 if count >= self.MAX_FRAMES:
                     self._stop_event.set()
@@ -1797,7 +1992,7 @@ class RecordingWindow(tk.Toplevel):
         self._elapsed += 1
         m, s = divmod(self._elapsed, 60)
         with self._lock:
-            fc = len(self._frames)
+            fc = self._writer.frame_count if self._writer else 0
         self._status_var.set(f"Recording...  {m:02d}:{s:02d}  ({fc} frames)")
         self._timer_id = self.after(1000, self._tick_timer)
 
@@ -1816,20 +2011,18 @@ class RecordingWindow(tk.Toplevel):
             self.deiconify()
 
         # Run the save process on a background thread (to prevent UI freeze)
+        fps = self._fps_var.get()
+
         def _save():
             with self._lock:
-                frames = list(self._frames)
-            if frames:
-                # Get width/height from capture region (determined from first frame)
-                import struct as _s
-                # Instead of reading from JPEG SOF0, open the first frame with PIL to get dimensions
-                from PIL import Image
-                sample = Image.open(io.BytesIO(frames[0]))
-                w, h = sample.size
-                sample.close()
-                avi = _build_mjpeg_avi(frames, self._fps_var.get(), w, h)
-                self._output_path.write_bytes(avi)
-            self.after(0, self._on_save_done, len(frames))
+                writer, self._writer = self._writer, None
+            count = writer.frame_count if writer else 0
+            if writer is not None:
+                if count:
+                    writer.finalize(self._output_path, fps)
+                else:
+                    writer.abort()
+            self.after(0, self._on_save_done, count)
 
         threading.Thread(target=_save, daemon=True).start()
 
@@ -3069,7 +3262,7 @@ class RuleDialog(tk.Toplevel):
 
 # ── Main application ──────────────────────────────────────
 
-class FolderLauncher(tk.Tk):
+class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
     # _active >= 0  : folder category index
     # _active == -1 : Terminal tab
 
@@ -3127,6 +3320,7 @@ class FolderLauncher(tk.Tk):
         self._save_after_id = None             # after ID for debounced config save
         self._pill_font_cache: dict = {}       # (font tuple) -> tkfont.Font, for tab width measurement
         self._load_config()
+        self._backup_config_daily()
 
         # generate icon after theme is resolved
         palette = ICON_PALETTES.get(self._theme)
@@ -3135,13 +3329,14 @@ class FolderLauncher(tk.Tk):
         self._task_sort: dict = {"col": None, "reverse": False}
         self._conn_sort: dict = {"col": None, "reverse": False}
         self._conn_search = tk.StringVar()
-        self._conn_search.trace_add(
-            "write",
-            lambda *_: self._render_list() if self._active == -1 else None,
-        )
+        self._conn_search_after = None   # debounce: re-render shortly after the last keystroke
+        self._conn_search.trace_add("write", self._on_conn_search_changed)
 
         self._notified: set[str] = set()  # tracks already-notified keys
         self._notify_past_open: bool = False  # open/close state of past notifications section
+        self._task_archive_open: bool = False        # archived tasks section open/close
+        self._task_select_pending: int | None = None # task to select after next render (palette)
+        self._palette_win: tk.Toplevel | None = None # command palette window (Ctrl+K)
         self._prev_bp: str = "md"  # responsive: previous breakpoint
         self._grep_folder: str = ""
         self._grep_query:  str = ""
@@ -3162,6 +3357,8 @@ class FolderLauncher(tk.Tk):
         self.after(30_000, self._check_rules)
         self.after(600, self._show_startup_summary)
         self._check_recurring_tasks()
+        self.bind("<Control-k>", self._open_command_palette)
+        self._setup_win_integration()
 
     # ── Config read/write (unified in config.json) ─────────────────
 
@@ -3169,9 +3366,9 @@ class FolderLauncher(tk.Tk):
         migrated = False
         if not CONFIG_FILE.exists():
             # auto-migrate from legacy individual files if they exist
-            old_folders   = Path(__file__).parent / "folders.json"
-            old_terminals = Path(__file__).parent / "terminals.json"
-            old_tasks     = Path(__file__).parent / "tasks.json"
+            old_folders   = _BASE_DIR / "folders.json"
+            old_terminals = _BASE_DIR / "terminals.json"
+            old_tasks     = _BASE_DIR / "tasks.json"
             cfg = {}
             if old_folders.exists():
                 try:
@@ -3196,6 +3393,7 @@ class FolderLauncher(tk.Tk):
                 self._alpha_cfg = 1.0
                 self._card_size = "normal"
                 self._font_size = 11
+                self._font_family = "Segoe UI"
                 self._grep_folder = ""
                 self._grep_query  = ""
                 self._grep_ext    = ""
@@ -3203,6 +3401,7 @@ class FolderLauncher(tk.Tk):
                 self._geometry_cfg = ""
                 self._active_cfg   = 0
                 self._export_lang  = "en"
+                self._task_hide_done = False
                 return
             migrated = True  # migration successful
         else:
@@ -3262,7 +3461,8 @@ class FolderLauncher(tk.Tk):
         self._alpha_cfg: float = float(cfg.get("alpha", 1.0))
         self._card_size: str = cfg.get("card_size", "normal")
         self._font_size: int = int(cfg.get("font_size", 11))
-        _update_fonts(self._font_size)
+        self._font_family: str = cfg.get("font_family", "Segoe UI")
+        _update_fonts(self._font_size, self._font_family)
         self._grep_folder = cfg.get("grep_folder", "")
         self._grep_query  = cfg.get("grep_query",  "")
         self._grep_ext    = cfg.get("grep_ext",    "")
@@ -3280,6 +3480,9 @@ class FolderLauncher(tk.Tk):
 
         # export report language ("en" | "ja")
         self._export_lang = cfg.get("export_lang", "en")
+
+        # Tasks tab: hide completed tasks
+        self._task_hide_done = bool(cfg.get("task_hide_done", False))
 
         # save to config.json when migrating from legacy files
         if migrated:
@@ -3325,9 +3528,11 @@ class FolderLauncher(tk.Tk):
             "alpha":           self.attributes("-alpha"),
             "card_size":       self._card_size,
             "font_size":       self._font_size,
+            "font_family":     getattr(self, "_font_family", "Segoe UI"),
             "grep_folder":     self._grep_folder,
             "grep_query":      self._grep_query,
             "grep_ext":        self._grep_ext,
+            "task_hide_done":  getattr(self, "_task_hide_done", False),
             "pinned_tabs":   self._pinned_tabs,
             "rules":         self._rules,
             "active_work":   self._active_work_record(),
@@ -3547,7 +3752,10 @@ class FolderLauncher(tk.Tk):
                                 relief="flat", font=FONT_SMALL)
             for key, label in [("plush","Plush"),("violet","Violet"),("dark","Dark"),("light","Light"),
                                 ("gemini","Gemini"),("claude","Claude"),("scarlet","Scarlet"),
-                                ("ocean","Ocean"),("rose","Rose"),("mint","Mint")]:
+                                ("ocean","Ocean"),("rose","Rose"),("mint","Mint"),
+                                ("peach","Peach"),("sky","Sky"),("lemon","Lemon"),
+                                ("lavender","Lavender"),("sakura","Sakura"),
+                                ("cyber","Cyber"),("synthwave","Synthwave"),("matrix","Matrix")]:
                 prefix = "* " if self._theme == key else "  "
                 theme_sub.add_command(label=prefix + label,
                                       command=lambda k=key: self._apply_theme(k))
@@ -3602,6 +3810,11 @@ class FolderLauncher(tk.Tk):
                 self._save_config()
             m.add_command(label=("* " if is_top else "  ") + "Pin on top",
                           command=_toggle_topmost)
+
+            # Start with Windows (HKCU Run key)
+            in_startup = self._is_startup_enabled()
+            m.add_command(label=("* " if in_startup else "  ") + "Start with Windows",
+                          command=self._toggle_startup)
             m.add_separator()
 
             # Screenshot options mode
@@ -3697,8 +3910,23 @@ class FolderLauncher(tk.Tk):
         # sync _list_frame width with canvas width on resize
         canvas.bind("<Configure>",
                     lambda e: canvas.itemconfigure(_win_id, width=e.width))
-        canvas.bind_all("<MouseWheel>",
-                        lambda e: canvas.yview_scroll(-1 * (e.delta // 120), "units"))
+        def _on_wheel(e):
+            # bind_all fires for every widget; scroll the nearest scrollable
+            # ancestor of the pointer so Treeview/Text/Listbox keep their
+            # native wheel handling, nested canvases (e.g. search results)
+            # scroll themselves, and dialogs don't scroll the list behind.
+            w = e.widget
+            if isinstance(w, str):   # widget already destroyed
+                return
+            while w is not None:
+                if isinstance(w, (ttk.Treeview, tk.Listbox, tk.Text)):
+                    return
+                if isinstance(w, tk.Canvas) and w.cget("yscrollcommand"):
+                    w.yview_scroll(-1 * (e.delta // 120), "units")
+                    return
+                w = getattr(w, "master", None)
+
+        canvas.bind_all("<MouseWheel>", _on_wheel)
         self._canvas = canvas
 
         # footer (buttons are reused on tab switch)
@@ -3914,9 +4142,6 @@ class FolderLauncher(tk.Tk):
             self._footer_btn2.pack_forget()
         elif self._active == -12:
             self._footer_btn.configure(text="Search", command=lambda: None)
-            self._footer_btn2.pack_forget()
-        elif self._active == -11:
-            self._footer_btn.configure(text="Today", command=self._cal_go_today)
             self._footer_btn2.pack_forget()
         else:
             self._footer_btn.configure(text="+ Add Folder", command=self._add_folder)
@@ -4335,6 +4560,20 @@ class FolderLauncher(tk.Tk):
         self._render_list()
 
     # ── Terminal list ─────────────────────────────────────
+
+    def _on_conn_search_changed(self, *_):
+        """Debounce search-box re-renders: rebuilding every card per
+        keystroke is wasteful, so wait until typing pauses."""
+        if self._active != -1:
+            return
+        if self._conn_search_after is not None:
+            self.after_cancel(self._conn_search_after)
+        self._conn_search_after = self.after(200, self._apply_conn_search)
+
+    def _apply_conn_search(self):
+        self._conn_search_after = None
+        if self._active == -1:
+            self._render_list()
 
     def _render_terminal_list(self):
         # ── 2-pane layout (left: group sidebar, right: connection list) ──
@@ -5089,15 +5328,19 @@ class FolderLauncher(tk.Tk):
                 _launch_teraterm(conn)
 
         elif atype == "add_task":
+            today = datetime.date.today().isoformat()
             task = {
-                "event":   action.get("task_event", "Auto Task"),
-                "process": action.get("task_process", ""),
-                "progress": 0,
-                "priority": "Medium",
-                "start": datetime.date.today().isoformat(),
-                "due": "",
-                "memo": f"Auto rule: {rule.get('name', '')}",
+                "event":        action.get("task_event", "Auto Task"),
+                "process":      action.get("task_process", ""),
+                "content":      f"Auto rule: {rule.get('name', '')}",
+                "progress":     0,
+                "deadline":     "",
+                "work_folders": [],
+                "recur":        "none",
+                "created_at":   today,
+                "updated":      today,
             }
+            _log_task_progress(task, 0, created=True)
             self._tasks.append(task)
             self._save_config()
             if self._active == -2:
@@ -5105,8 +5348,8 @@ class FolderLauncher(tk.Tk):
 
         elif atype == "notify":
             item = {
-                "event":        action.get("title", rule.get("name", "Rule Fired")),
-                "process":      action.get("message", ""),
+                "title":        action.get("title", rule.get("name", "Rule Fired")),
+                "notes":        action.get("message", ""),
                 "scheduled_at": "",
                 "recurrence":   "none",
             }
@@ -5401,8 +5644,8 @@ class FolderLauncher(tk.Tk):
         res_cv.configure(yscrollcommand=lambda lo, hi:
                          _autohide_scrollbar(res_vsb, lo, hi, _res_sb_pack))
         res_cv.bind("<Configure>", lambda e: res_cv.itemconfigure(_win, width=e.width))
-        res_cv.bind("<MouseWheel>",
-                    lambda e: res_cv.yview_scroll(-1 * (e.delta // 120), "units"))
+        # wheel scrolling is handled by the global <MouseWheel> handler,
+        # which scrolls the nearest scrollable canvas under the pointer
         res_cv.pack(side="left", fill="both", expand=True)
         # res_vsb is shown by _autohide_scrollbar only when results overflow
 
@@ -5662,7 +5905,7 @@ class FolderLauncher(tk.Tk):
             ev = qa_event.get().strip() or "General"
             self._task_quick_event = ev   # remember group for the next add
             today = datetime.date.today().isoformat()
-            self._tasks.append({
+            new_task = {
                 "event":        ev,
                 "process":      txt,
                 "content":      "",
@@ -5672,7 +5915,9 @@ class FolderLauncher(tk.Tk):
                 "recur":        "none",
                 "created_at":   today,
                 "updated":      today,
-            })
+            }
+            _log_task_progress(new_task, 0, created=True)
+            self._tasks.append(new_task)
             self._save_tasks()
             self._task_quick_focus = True   # refocus entry after re-render
             self._render_list()
@@ -5706,6 +5951,43 @@ class FolderLauncher(tk.Tk):
             self._task_quick_focus = False
             content_entry.focus_set()
 
+        # ── visibility filter (archived always hidden; done optional) ──
+        active_tasks = [(i, t) for i, t in enumerate(self._tasks)
+                        if not t.get("archived")]
+        done_count = sum(1 for _, t in active_tasks
+                         if t.get("progress", 0) >= 100)
+        visible = ([(i, t) for i, t in active_tasks
+                    if t.get("progress", 0) < 100]
+                   if self._task_hide_done else active_tasks)
+
+        if self._tasks:
+            filter_row = tk.Frame(self._list_frame, bg=C["bg"])
+            filter_row.pack(fill="x", padx=6)
+
+            tk.Button(filter_row, text="History",
+                      command=self._open_task_history,
+                      bg=C["tab_inact"], fg=C["text_sub"], relief="flat", bd=0,
+                      font=FONT_SMALL, cursor="hand2", padx=8, pady=1,
+                      activebackground=C["card_h"], activeforeground=C["text"],
+                      ).pack(side="right")
+
+            if active_tasks:
+                hd_var = tk.BooleanVar(value=self._task_hide_done)
+
+                def _toggle_hide_done():
+                    self._task_hide_done = hd_var.get()
+                    self._save_config()
+                    self._render_list()
+
+                hd_text = "Hide done"
+                if self._task_hide_done and done_count:
+                    hd_text += f"  ({done_count} hidden)"
+                tk.Checkbutton(filter_row, text=hd_text, variable=hd_var,
+                               command=_toggle_hide_done,
+                               bg=C["bg"], fg=C["text_sub"], selectcolor=C["card"],
+                               activebackground=C["bg"], font=FONT_SMALL,
+                               cursor="hand2").pack(side="left")
+
         # work-in-progress bar
         self._work_bar_lbl = None
         if self._work_active is not None:
@@ -5738,9 +6020,19 @@ class FolderLauncher(tk.Tk):
             ).pack(pady=20)
             return
 
+        if not visible:
+            msg = ("All tasks are done (hidden)."
+                   if self._task_hide_done and done_count
+                   else "No tasks to show.")
+            tk.Label(self._list_frame, text=msg,
+                     bg=C["bg"], fg=C["text_sub"],
+                     font=FONT_SMALL, justify="center").pack(pady=20)
+            self._render_task_archived_section()
+            return
+
         # group by event name (preserve insertion order)
         groups: dict[str, list[tuple[int, dict]]] = {}
-        for i, task in enumerate(self._tasks):
+        for i, task in visible:
             groups.setdefault(task["event"], []).append((i, task))
 
         # ── Apply sort ──
@@ -5778,7 +6070,7 @@ class FolderLauncher(tk.Tk):
                 self._task_sort["reverse"] = False
             self._render_list()
 
-        n_rows = len(self._tasks) + len(groups)
+        n_rows = len(visible) + len(groups)
         tree_height = max(3, min(n_rows, 14))
 
         tree_wrap = tk.Frame(self._list_frame, bg=C["bg"])
@@ -5865,7 +6157,8 @@ class FolderLauncher(tk.Tk):
             pass
 
         # row color by progress (red=critical / yellow=caution / green=ok)
-        _dark = self._theme in ("dark", "claude", "scarlet", "ocean")
+        _dark = self._theme in ("dark", "claude", "scarlet", "ocean",
+                                "cyber", "synthwave", "matrix")
         if _dark:
             tree.tag_configure("p_red",    background="#5C1A20", foreground="#FFB0B8")
             tree.tag_configure("p_yellow", background="#4A3A00", foreground="#FFE680")
@@ -6146,11 +6439,17 @@ class FolderLauncher(tk.Tk):
                 self._save_tasks()
                 self._render_list()
             else:
-                # rebuild task/event order
-                new_tasks = []
+                # rebuild task/event order from the tree; tasks not shown
+                # there (archived / hidden done) must be kept, appended at
+                # the end in their original order
+                vis_idx = []
                 for ev_row in tree.get_children():
                     for child in tree.get_children(ev_row):
-                        new_tasks.append(self._tasks[int(child)])
+                        vis_idx.append(int(child))
+                vis_set = set(vis_idx)
+                new_tasks = [self._tasks[i] for i in vis_idx]
+                new_tasks += [t for j, t in enumerate(self._tasks)
+                              if j not in vis_set]
                 self._tasks[:] = new_tasks
                 self._task_sort = {"col": None, "reverse": False}
                 self._save_tasks()
@@ -6159,6 +6458,16 @@ class FolderLauncher(tk.Tk):
         tree.bind("<ButtonPress-1>",   on_dnd_press)
         tree.bind("<B1-Motion>",       on_dnd_motion)
         tree.bind("<ButtonRelease-1>", on_dnd_release)
+
+        # select the task requested from the command palette, if any
+        pending = self._task_select_pending
+        if pending is not None:
+            self._task_select_pending = None
+            if tree.exists(str(pending)):
+                tree.selection_set(str(pending))
+                tree.see(str(pending))
+
+        self._render_task_archived_section()
 
     def _task_tree_edit(self, tree):
         sel = tree.selection()
@@ -6310,9 +6619,10 @@ class FolderLauncher(tk.Tk):
                         command=lambda p=pct, i=idx: self._quick_set_progress(i, p))
                 menu.add_cascade(label=f"Progress ({cur_pct}%)", menu=pg_menu)
                 menu.add_separator()
-                menu.add_command(label="Edit",   command=lambda: self._edit_task(idx))
+                menu.add_command(label="Edit",    command=lambda: self._edit_task(idx))
+                menu.add_command(label="Archive", command=lambda: self._archive_task(idx))
                 menu.add_separator()
-                menu.add_command(label="Delete", command=lambda: self._remove_task(idx))
+                menu.add_command(label="Delete",  command=lambda: self._remove_task(idx))
             except ValueError:
                 # event parent row
                 ev_name = tree.item(row, "text")
@@ -6356,6 +6666,7 @@ class FolderLauncher(tk.Tk):
         """Set a task's progress directly; spawn the next occurrence if it completes a recurring task."""
         task = self._tasks[idx]
         prev = task.get("progress", 0)
+        _log_task_progress(task, pct)
         task["progress"] = pct
         task["updated"]  = datetime.date.today().isoformat()
         if task.get("recur", "none") != "none" and pct == 100 and prev < 100:
@@ -6406,6 +6717,7 @@ class FolderLauncher(tk.Tk):
         today = datetime.date.today().isoformat()
         dlg.result["created_at"] = today   # creation date
         dlg.result["updated"]    = today   # last updated date
+        _log_task_progress(dlg.result, dlg.result.get("progress", 0), created=True)
         self._tasks.append(dlg.result)
         self._save_tasks()
         self._render_list()
@@ -6416,6 +6728,9 @@ class FolderLauncher(tk.Tk):
         if dlg.result is None:
             return
         prev_progress = self._tasks[idx].get("progress", 0)
+        # record before merging: dict() copies the progress_log reference,
+        # so the entry written here carries over into the merged task
+        _log_task_progress(self._tasks[idx], dlg.result.get("progress", 0))
         # overwrite while preserving existing fields (memos, created_at, etc.)
         merged = dict(self._tasks[idx])
         merged.update(dlg.result)
@@ -6473,6 +6788,7 @@ class FolderLauncher(tk.Tk):
             "created_at":   datetime.date.today().isoformat(),
             "updated":      datetime.date.today().isoformat(),
         }
+        _log_task_progress(new_task, 0, created=True)
         self._tasks.append(new_task)
 
     def _check_recurring_tasks(self):
@@ -6481,7 +6797,8 @@ class FolderLauncher(tk.Tk):
         to_add = []
         for task in self._tasks:
             recur = task.get("recur", "none")
-            if recur == "none" or task.get("progress", 0) < 100:
+            if (recur == "none" or task.get("progress", 0) < 100
+                    or task.get("archived")):
                 continue
             dl = task.get("deadline", "")
             next_dl = self._next_recur_date(dl, recur)
@@ -6512,6 +6829,74 @@ class FolderLauncher(tk.Tk):
             self._tasks.pop(idx)
             self._save_tasks()
             self._render_list()
+
+    # ── Task archive ──────────────────────────────────────
+
+    def _archive_task(self, idx: int):
+        """Move a task to the archived section (kept in data, hidden from the tree)."""
+        self._tasks[idx]["archived"] = True
+        self._tasks[idx]["updated"]  = datetime.date.today().isoformat()
+        self._save_tasks()
+        self._render_list()
+
+    def _unarchive_task(self, idx: int):
+        self._tasks[idx]["archived"] = False
+        self._tasks[idx]["updated"]  = datetime.date.today().isoformat()
+        self._save_tasks()
+        self._render_list()
+
+    def _render_task_archived_section(self):
+        """Collapsible list of archived tasks at the bottom of the Tasks tab."""
+        archived = [(i, t) for i, t in enumerate(self._tasks)
+                    if t.get("archived")]
+        if not archived:
+            return
+        tk.Frame(self._list_frame, bg=C["border"], height=1).pack(
+            fill="x", padx=2, pady=(8, 0))
+
+        arch_frame = tk.Frame(self._list_frame, bg=C["bg"])
+        arrow  = "v" if self._task_archive_open else ">"
+        toggle = tk.Label(self._list_frame,
+                          text=f"{arrow}  Archived  ({len(archived)})",
+                          bg=C["bg"], fg=C["text_sub"],
+                          font=FONT_SMALL, cursor="hand2", anchor="w")
+        toggle.pack(fill="x", padx=6, pady=(2, 0))
+
+        def _toggle(_e=None):
+            self._task_archive_open = not self._task_archive_open
+            if self._task_archive_open:
+                toggle.configure(text=f"v  Archived  ({len(archived)})")
+                arch_frame.pack(fill="x")
+            else:
+                toggle.configure(text=f">  Archived  ({len(archived)})")
+                arch_frame.pack_forget()
+
+        toggle.bind("<Button-1>", _toggle)
+
+        for i, task in archived:
+            card = tk.Frame(arch_frame, bg=C["bg"], pady=3, padx=8,
+                            highlightthickness=1, highlightbackground=C["border"])
+            card.pack(fill="x", pady=PAD_ROW_Y, padx=PAD_ROW_X)
+            label = (f"[{task.get('event', '')}]  {task.get('process', '')}"
+                     f"  {task.get('progress', 0)}%")
+            tk.Label(card, text=label, bg=C["bg"], fg=C["text_sub"],
+                     font=FONT_SMALL, anchor="w").pack(
+                         side="left", fill="x", expand=True)
+            tk.Button(card, text="x",
+                      command=lambda i=i: self._remove_task(i),
+                      bg=C["bg"], fg=C["btn_del"], relief="flat", bd=0,
+                      font=FONT_SMALL, cursor="hand2",
+                      activebackground=C["bg"], activeforeground=C["btn_del_h"],
+                      ).pack(side="right", padx=(6, 0))
+            tk.Button(card, text="Restore",
+                      command=lambda i=i: self._unarchive_task(i),
+                      bg=C["bg"], fg=C["accent"], relief="flat", bd=0,
+                      font=FONT_SMALL, cursor="hand2",
+                      activebackground=C["bg"], activeforeground=C["accent_dk"],
+                      ).pack(side="right")
+
+        if self._task_archive_open:
+            arch_frame.pack(fill="x")
 
     # ── Work time tracking ────────────────────────────────
 
@@ -6598,10 +6983,21 @@ class FolderLauncher(tk.Tk):
         self._font_size = size
         _update_fonts(size)
         self._save_config()
-        # Destroy all widgets and rebuild, similar to a theme change
+        self._rebuild_ui()
+
+    def _set_font_family(self, family: str):
+        """Change the UI font family and rebuild the UI."""
+        self._font_family = family
+        _update_fonts(self._font_size, family)
+        self._save_config()
+        self._rebuild_ui()
+
+    def _rebuild_ui(self):
+        """Destroy all widgets and rebuild (font/theme change)."""
         if self._tick_id is not None:
             self.after_cancel(self._tick_id)
             self._tick_id = None
+        self._pill_font_cache.clear()   # measured with the old fonts
         for w in self.winfo_children():
             w.destroy()
         self.configure(bg=C["bg"])
@@ -6672,10 +7068,10 @@ class FolderLauncher(tk.Tk):
         today = datetime.date.today().isoformat()
 
         due_today = [t for t in self._tasks
-                     if t.get("due") == today and t.get("status") != "done"]
+                     if t.get("deadline") == today and t.get("progress", 0) < 100]
         overdue   = [t for t in self._tasks
-                     if t.get("due") and t.get("due") < today
-                     and t.get("status") != "done"]
+                     if t.get("deadline") and t.get("deadline") < today
+                     and t.get("progress", 0) < 100]
 
         if not due_today and not overdue:
             return
@@ -6702,8 +7098,8 @@ class FolderLauncher(tk.Tk):
                      bg=C["bg"], fg=fg_title,
                      font=FONT_BOLD, anchor="w").pack(fill="x", pady=(4, 2))
             for t in tasks[:8]:
-                name = t.get("event", "") or t.get("process", "—")
-                due  = t.get("due", "")
+                name = t.get("process", "") or t.get("event", "—")
+                due  = t.get("deadline", "")
                 line = f"  {name}" + (f"  ({due})" if due else "")
                 tk.Label(body, text=line,
                          bg=C["bg"], fg=C["text"],
@@ -6801,6 +7197,397 @@ class FolderLauncher(tk.Tk):
             except Exception:
                 pass
 
+    # ── Command palette (Ctrl+K) ──────────────────────────
+
+    def _palette_items(self) -> list[tuple[str, str, str, object]]:
+        """Collect all launchable items as (kind, label, search_text, action)."""
+        items: list[tuple[str, str, str, object]] = []
+        for cat in self._data:
+            for entry in cat.get("folders", []):
+                kind = "File" if entry.get("type") == "file" else "Folder"
+                name, path = entry.get("name", ""), entry.get("path", "")
+                items.append((kind, name, f"{name} {path}",
+                              lambda p=path, t=entry.get("type", "folder"):
+                                  self._open_item(p, t)))
+        for conn in self._conns:
+            name = conn.get("name") or conn.get("host", "")
+            items.append(("Conn", f"{name}  ({conn.get('protocol', '')})",
+                          f"{name} {conn.get('host', '')} {conn.get('protocol', '')}",
+                          lambda c=conn: self._connect_server(c)))
+        for i, task in enumerate(self._tasks):
+            if task.get("archived"):
+                continue
+            label = f"[{task.get('event', '')}] {task.get('process', '')}"
+            items.append(("Task", label,
+                          f"{task.get('event', '')} {task.get('process', '')} "
+                          f"{task.get('content', '')}",
+                          lambda idx=i: self._palette_goto_task(idx)))
+        for cat in self._bookmarks:
+            for bm in cat.get("items", []):
+                items.append(("Web", bm.get("name", ""),
+                              f"{bm.get('name', '')} {bm.get('url', '')}",
+                              lambda u=bm.get("url", ""): webbrowser.open(u)))
+        for key, label, idx in self._SYSTEM_TABS:
+            items.append(("Tab", label, f"tab {label} {key}",
+                          lambda i2=idx: self._switch_tab(i2)))
+        for ci, cat in enumerate(self._data):
+            items.append(("Tab", cat["category"], f"tab {cat['category']}",
+                          lambda i2=ci: self._switch_tab(i2)))
+        return items
+
+    def _palette_goto_task(self, idx: int):
+        """Jump to the Tasks tab and select the given task."""
+        self._task_select_pending = idx
+        self._switch_tab(-2)
+
+    def _open_command_palette(self, _e=None):
+        # toggle: a second Ctrl+K closes the palette
+        if self._palette_win is not None:
+            try:
+                self._palette_win.destroy()
+            except Exception:
+                pass
+            self._palette_win = None
+            return "break"
+        # don't fire while typing in an input (Entry/Text bind Ctrl+K natively)
+        try:
+            f = self.focus_get()
+        except Exception:
+            f = None
+        if isinstance(f, (tk.Entry, tk.Text, tk.Spinbox)):
+            return
+
+        win = tk.Toplevel(self)
+        self._palette_win = win
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        win.configure(bg=C["accent"])
+        inner = tk.Frame(win, bg=C["card"])
+        inner.pack(fill="both", expand=True, padx=2, pady=2)
+
+        var = tk.StringVar()
+        entry = tk.Entry(inner, textvariable=var, font=FONT,
+                         bg=C["card"], fg=C["text"], relief="flat", bd=0,
+                         insertbackground=C["accent"])
+        entry.pack(fill="x", padx=10, pady=(10, 6), ipady=3)
+        tk.Frame(inner, bg=C["border"], height=1).pack(fill="x")
+        lb = tk.Listbox(inner, height=10, font=FONT,
+                        bg=C["card"], fg=C["text"],
+                        selectbackground=C["accent_lt"],
+                        selectforeground=C["accent_dk"],
+                        relief="flat", bd=0, activestyle="none",
+                        highlightthickness=0)
+        lb.pack(fill="both", expand=True, padx=6, pady=6)
+
+        items = self._palette_items()
+        matches: list = []
+
+        def _refresh(*_):
+            q = var.get()
+            scored = []
+            for it in items:
+                s = _fuzzy_score(q, it[2])
+                if s is not None:
+                    scored.append((s, it))
+            scored.sort(key=lambda x: x[0])
+            matches[:] = [it for _, it in scored[:12]]
+            lb.delete(0, "end")
+            for kind, label, _t, _a in matches:
+                lb.insert("end", f" [{kind}]  {label}")
+            if matches:
+                lb.selection_set(0)
+
+        var.trace_add("write", _refresh)
+        _refresh()
+
+        def _close(_e=None):
+            self._palette_win = None
+            try:
+                win.destroy()
+            except Exception:
+                pass
+
+        def _run(_e=None):
+            sel = lb.curselection()
+            i = sel[0] if sel else 0
+            if i >= len(matches):
+                _close()
+                return
+            action = matches[i][3]
+            _close()
+            self.after(10, action)   # run after the palette is gone
+
+        def _move(d):
+            cur = lb.curselection()
+            cur = cur[0] if cur else 0
+            nxt = max(0, min(len(matches) - 1, cur + d))
+            lb.selection_clear(0, "end")
+            lb.selection_set(nxt)
+            lb.see(nxt)
+            return "break"
+
+        entry.bind("<Return>",  _run)
+        entry.bind("<Escape>",  _close)
+        entry.bind("<Down>",    lambda e: _move(1))
+        entry.bind("<Up>",      lambda e: _move(-1))
+        lb.bind("<Return>",          _run)
+        lb.bind("<Double-Button-1>", _run)
+        lb.bind("<Escape>",          _close)
+
+        # close when focus leaves the palette (click elsewhere / Alt-Tab)
+        def _maybe_close(_e=None):
+            def _check():
+                if self._palette_win is not win or not win.winfo_exists():
+                    return
+                try:
+                    f2 = win.focus_get()
+                except Exception:
+                    f2 = None
+                if f2 is None or f2.winfo_toplevel() is not win:
+                    _close()
+            win.after(120, _check)
+        entry.bind("<FocusOut>", _maybe_close)
+        lb.bind("<FocusOut>",    _maybe_close)
+
+        self.update_idletasks()
+        w = max(360, min(520, self.winfo_width() - 40))
+        x = self.winfo_rootx() + (self.winfo_width() - w) // 2
+        y = self.winfo_rooty() + 60
+        win.geometry(f"{w}x320+{x}+{y}")
+        entry.focus_force()
+        return "break"
+
+    # ── Windows shell integration (drag&drop / global hotkey) ──
+
+    def _setup_win_integration(self):
+        """Global hotkey (Win+Shift+G) and Explorer drag&drop.
+
+        Both deliberately avoid subclassing the Tk window procedure: running
+        a Python WNDPROC for every window message crashes CPython inside
+        Tk's event loop (fatal "PyEval_RestoreThread" GIL error). The hotkey
+        therefore lives on its own thread with its own message queue, and
+        drag&drop uses the optional tkinterdnd2 package (native Tcl side)
+        when installed.
+        """
+        # ── global hotkey: dedicated thread + thread message queue ──
+        self._hotkey_event = threading.Event()
+
+        def _hotkey_loop():
+            user32 = ctypes.windll.user32
+            user32.RegisterHotKey.argtypes = [wintypes.HWND, ctypes.c_int,
+                                              wintypes.UINT, wintypes.UINT]
+            # MOD_SHIFT | MOD_WIN | MOD_NOREPEAT,  VK 'G'
+            # hwnd=None: WM_HOTKEY is posted to this thread's message queue
+            if not user32.RegisterHotKey(None, 1, 0x4 | 0x8 | 0x4000, 0x47):
+                return   # taken by another app — feature silently off
+            msg = wintypes.MSG()
+            while user32.GetMessageW(ctypes.byref(msg), None, 0, 0) > 0:
+                if msg.message == 0x0312:   # WM_HOTKEY
+                    self._hotkey_event.set()
+
+        threading.Thread(target=_hotkey_loop, daemon=True).start()
+        self._poll_hotkey()
+
+        # ── drag&drop: only when tkinterdnd2 is available ──
+        if DND_FILES is not None:
+            try:
+                self.drop_target_register(DND_FILES)
+                self.dnd_bind("<<Drop>>", self._on_dnd_drop)
+            except Exception:
+                pass
+
+    def _poll_hotkey(self):
+        """Relay hotkey presses from the worker thread to the UI thread.
+        Polling an Event avoids calling any Tk API off the main thread."""
+        if self._hotkey_event.is_set():
+            self._hotkey_event.clear()
+            self._on_global_hotkey()
+        self.after(150, self._poll_hotkey)
+
+    def _on_dnd_drop(self, event):
+        try:
+            # Tcl list: paths with spaces arrive wrapped in braces
+            paths = list(self.tk.splitlist(event.data))
+        except Exception:
+            paths = [event.data]
+        self._handle_dropped_paths(paths)
+
+    def _handle_dropped_paths(self, paths: list):
+        """Register Explorer-dropped files/folders into the active folder tab."""
+        if self._active < 0:
+            self._pathbar_var.set(
+                "Drop ignored — switch to a folder tab to register items")
+            return
+        folders = self._current["folders"]
+        existing = {e.get("path") for e in folders}
+        added = 0
+        for p in paths:
+            p = os.path.normpath(p)
+            if p in existing:
+                continue
+            entry = {"name": os.path.basename(p) or p, "path": p}
+            if os.path.isfile(p):
+                entry["type"] = "file"
+            folders.append(entry)
+            existing.add(p)
+            added += 1
+        if added:
+            self._save()
+            self._render_list()
+            self._pathbar_var.set(f"Added {added} item(s) by drag && drop")
+
+    def _on_global_hotkey(self):
+        """Win+Shift+G: bring Gem to the front; hide to tray if already focused."""
+        try:
+            if self.state() in ("withdrawn", "iconic"):
+                self._do_restore()
+            elif self.focus_displayof() is not None:
+                self._minimize_to_tray()   # already in front → toggle hide
+            else:
+                self.deiconify()
+                self.lift()
+                self.focus_force()
+        except Exception:
+            pass
+
+    # ── Config daily backup ───────────────────────────────
+
+    def _backup_config_daily(self):
+        """Keep a rolling 7-day backup of config.json under backups/."""
+        try:
+            if not CONFIG_FILE.exists() or CONFIG_FILE.stat().st_size == 0:
+                return
+            bdir = _BASE_DIR / "backups"
+            bdir.mkdir(exist_ok=True)
+            dst = bdir / f"config-{datetime.date.today().strftime('%Y%m%d')}.json"
+            if not dst.exists():
+                import shutil
+                shutil.copy2(CONFIG_FILE, dst)
+            for old in sorted(bdir.glob("config-*.json"))[:-7]:
+                old.unlink()
+        except Exception:
+            pass
+
+    # ── Start with Windows ────────────────────────────────
+
+    _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
+
+    def _is_startup_enabled(self) -> bool:
+        import winreg
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, self._RUN_KEY) as k:
+                winreg.QueryValueEx(k, "Gem")
+            return True
+        except OSError:
+            return False
+
+    def _toggle_startup(self):
+        import winreg
+        enable = not self._is_startup_enabled()
+        try:
+            with winreg.OpenKey(winreg.HKEY_CURRENT_USER, self._RUN_KEY, 0,
+                                winreg.KEY_SET_VALUE) as k:
+                if enable:
+                    if getattr(sys, "frozen", False):
+                        cmd = f'"{sys.executable}"'
+                    else:
+                        # prefer pythonw.exe so no console window appears
+                        pyw = Path(sys.executable).with_name("pythonw.exe")
+                        py  = pyw if pyw.exists() else Path(sys.executable)
+                        cmd = f'"{py}" "{Path(__file__).resolve()}"'
+                    winreg.SetValueEx(k, "Gem", 0, winreg.REG_SZ, cmd)
+                else:
+                    winreg.DeleteValue(k, "Gem")
+        except OSError as e:
+            messagebox.showerror("Start with Windows", str(e), parent=self)
+
+
+    def _open_task_history(self):
+        """Daily digest of task progress changes (newest day first)."""
+        # date -> [(task, log entry), ...] in task order; archived included
+        by_date: dict[str, list[tuple[dict, dict]]] = {}
+        for task in self._tasks:
+            for entry in task.get("progress_log", []):
+                if entry.get("from") == entry.get("to"):
+                    continue   # same-day change that was reverted — no net change
+                by_date.setdefault(entry.get("date", ""), []).append((task, entry))
+
+        win = tk.Toplevel(self)
+        win.title("Progress History")
+        win.configure(bg=C["bg"])
+        win.geometry("420x480")
+        win.minsize(320, 240)
+        win.resizable(True, True)
+
+        tk.Label(win, text="Progress History",
+                 bg=C["accent"], fg="white",
+                 font=FONT_BOLD, anchor="w", padx=12, pady=6).pack(fill="x")
+
+        wrapper = tk.Frame(win, bg=C["bg"])
+        wrapper.pack(fill="both", expand=True, padx=8, pady=6)
+        cv = tk.Canvas(wrapper, bg=C["bg"], highlightthickness=0)
+        sb = tk.Scrollbar(wrapper, orient="vertical", command=cv.yview)
+        body = tk.Frame(cv, bg=C["bg"])
+        body.bind("<Configure>",
+                  lambda e: cv.configure(scrollregion=cv.bbox("all")))
+        _win_id = cv.create_window((0, 0), window=body, anchor="nw")
+        _sb_pack = dict(side="right", fill="y")
+        cv.configure(yscrollcommand=lambda lo, hi:
+                     _autohide_scrollbar(sb, lo, hi, _sb_pack))
+        cv.bind("<Configure>", lambda e: cv.itemconfigure(_win_id, width=e.width))
+        cv.pack(side="left", fill="both", expand=True)
+        # wheel scrolling comes from the global <MouseWheel> handler, which
+        # scrolls the nearest scrollable canvas under the pointer
+
+        if not by_date:
+            tk.Label(body,
+                     text="No history yet.\nProgress changes are recorded from now on.",
+                     bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL,
+                     justify="center").pack(pady=24)
+        else:
+            MAX_DAYS = 30
+            dates = sorted(by_date.keys(), reverse=True)
+            for d in dates[:MAX_DAYS]:
+                try:
+                    hdr = f"{d} ({datetime.date.fromisoformat(d).strftime('%a')})"
+                except ValueError:
+                    hdr = d
+                tk.Label(body, text=hdr, bg=C["bg"], fg=C["text"],
+                         font=FONT_BOLD, anchor="w").pack(
+                             fill="x", padx=4, pady=(8, 2))
+                for task, entry in by_date[d]:
+                    row = tk.Frame(body, bg=C["card"], highlightthickness=1,
+                                   highlightbackground=C["border"])
+                    row.pack(fill="x", padx=4, pady=1)
+                    name = f"[{task.get('event', '')}] {task.get('process', '')}"
+                    if task.get("archived"):
+                        name += "  (archived)"
+                    tk.Label(row, text=name, bg=C["card"], fg=C["text"],
+                             font=FONT_SMALL, anchor="w").pack(
+                                 side="left", fill="x", expand=True,
+                                 padx=(8, 4), pady=3)
+                    frm, to = entry.get("from"), entry.get("to", 0)
+                    chg = f"created ({to}%)" if frm is None else f"{frm}% → {to}%"
+                    fg = "#4caf50" if to == 100 else C["accent_dk"]
+                    tk.Label(row, text=chg, bg=C["card"], fg=fg,
+                             font=FONT_SMALL_BOLD, anchor="e").pack(
+                                 side="right", padx=(4, 8), pady=3)
+            if len(dates) > MAX_DAYS:
+                tk.Label(body,
+                         text=f"({len(dates) - MAX_DAYS} older day(s) omitted)",
+                         bg=C["bg"], fg=C["text_sub"], font=FONT_TINY,
+                         anchor="w").pack(fill="x", padx=4, pady=(8, 4))
+
+        tk.Button(win, text="Close", command=win.destroy,
+                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  font=FONT, cursor="hand2", padx=16, pady=4,
+                  activebackground=C["border"], activeforeground=C["text"],
+                  ).pack(pady=(0, 10))
+
+        win.update_idletasks()
+        px = self.winfo_x() + (self.winfo_width()  - win.winfo_width())  // 2
+        py = self.winfo_y() + (self.winfo_height() - win.winfo_height()) // 2
+        win.geometry(f"+{px}+{py}")
 
     def _open_work_log(self, task_idx: int):
         """Open the work log list and delete dialog."""
@@ -6956,9 +7743,11 @@ class FolderLauncher(tk.Tk):
 
         CONT_INDENT = "　" * 7 if ja else ("    " + " " * 9 + "  ")
 
-        # group by event (preserve insertion order)
+        # group by event (preserve insertion order; archived tasks excluded)
         groups: dict[str, list[dict]] = {}
         for task in self._tasks:
+            if task.get("archived"):
+                continue
             groups.setdefault(task["event"], []).append(task)
 
         lines: list[str] = []
@@ -7417,17 +8206,6 @@ class FolderLauncher(tk.Tk):
 
     # ── Theme ─────────────────────────────────────────────
 
-    def _show_theme_menu(self):
-        menu = tk.Menu(self, tearoff=0)
-        labels = {"violet": "Violet", "dark": "Dark", "light": "Light", "gemini": "Gemini", "claude": "Claude", "scarlet": "Scarlet", "ocean": "Ocean", "rose": "Rose", "mint": "Mint"}
-        for key, label in labels.items():
-            prefix = "* " if self._theme == key else "  "
-            menu.add_command(
-                label=prefix + label,
-                command=lambda k=key: self._apply_theme(k),
-            )
-        self._popup_menu(menu, self.winfo_pointerx(), self.winfo_pointery())
-
     def _set_export_lang(self, lang: str):
         """Set the language used for the exported task report (en | ja)."""
         if lang not in ("en", "ja"):
@@ -7546,12 +8324,6 @@ class FolderLauncher(tk.Tk):
         self.deiconify()
         subprocess.Popen(["explorer", str(save_dir)])
 
-    def _open_folder(self, path: str):
-        if not os.path.isdir(path):
-            messagebox.showwarning("Error", f"Folder not found:\n{path}", parent=self)
-            return
-        subprocess.Popen(["explorer", os.path.normpath(path)])
-
     def _open_item(self, path: str, item_type: str):
         if item_type == "file":
             if not os.path.isfile(path):
@@ -7568,7 +8340,7 @@ class FolderLauncher(tk.Tk):
         """Periodically check scheduled notifications (every 30 seconds)"""
         now = datetime.datetime.now()
         updated = False
-        for i, item in enumerate(self._notify_items):
+        for item in self._notify_items:
             sched_str = item.get("scheduled_at", "")
             if not sched_str:
                 continue
@@ -7578,7 +8350,9 @@ class FolderLauncher(tk.Tk):
                 continue
             notify_before = item.get("notify_before", 5)
             notify_at = sched - datetime.timedelta(minutes=notify_before)
-            key = f"{i}_{sched_str}"
+            # key by identity (title + time), not list index: deleting an
+            # item must not shift another item's "already notified" state
+            key = f"{item.get('title', '')}|{sched_str}"
             if notify_at <= now < sched and key not in self._notified:
                 self._notified.add(key)
                 NotificationPopup(self, item, self._notify_display_sec.get() * 1000)
