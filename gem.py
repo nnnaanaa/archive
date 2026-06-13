@@ -20,8 +20,10 @@ import threading
 import time
 import io
 import re
+import math
 import calendar
 import webbrowser
+from collections import deque
 from ctypes import wintypes
 from pathlib import Path
 from PIL import ImageGrab, Image
@@ -421,6 +423,115 @@ def _autohide_scrollbar(sb, lo, hi, pack_kw):
     sb.set(lo, hi)
 
 
+def _blend_hex(c1: str, c2: str, t: float) -> str:
+    """Linearly blend two #RRGGBB colors (t=0 -> c1, t=1 -> c2)."""
+    a = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
+    b = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
+    return "#%02X%02X%02X" % tuple(round(x + (y - x) * t) for x, y in zip(a, b))
+
+
+def _style_flat_scrollbars(root) -> None:
+    """Configure thin, flat, arrow-less ttk scrollbar styles in theme colors.
+
+    Defines Gem.Vertical.TScrollbar / Gem.Horizontal.TScrollbar on the
+    root's shared style database; call again after a theme change.
+    """
+    style = ttk.Style(root)
+    for orient, sticky in (("Vertical", "ns"), ("Horizontal", "ew")):
+        name = f"Gem.{orient}.TScrollbar"
+        style.layout(name, [
+            (f"{orient}.Scrollbar.trough",
+             {"children": [(f"{orient}.Scrollbar.thumb",
+                            {"expand": "1", "sticky": "nswe"})],
+              "sticky": sticky}),
+        ])
+        style.configure(name,
+                        troughcolor=C["bg"], background=C["accent"],
+                        bordercolor=C["bg"],
+                        lightcolor=C["accent"], darkcolor=C["accent"],
+                        gripcount=0, relief="flat", width=8)
+        style.map(name,
+                  background=[("pressed", C["accent_dk"]),
+                              ("active", C["accent_lt"])])
+
+
+# ── System stats (CPU/RAM via Win32, no extra deps) ──────
+
+_cpu_prev: tuple[int, int] | None = None   # (idle, kernel+user) cumulative times
+
+
+def _sample_cpu() -> float | None:
+    """Return system CPU usage 0-100 since the previous call (None on the first)."""
+    global _cpu_prev
+    try:
+        idle, kern, user = wintypes.FILETIME(), wintypes.FILETIME(), wintypes.FILETIME()
+        if not ctypes.windll.kernel32.GetSystemTimes(
+                ctypes.byref(idle), ctypes.byref(kern), ctypes.byref(user)):
+            return None
+        def _q(ft): return (ft.dwHighDateTime << 32) | ft.dwLowDateTime
+        i, t = _q(idle), _q(kern) + _q(user)   # kernel time includes idle
+        prev, _cpu_prev = _cpu_prev, (i, t)
+        if prev is None:
+            return None
+        di, dt = i - prev[0], t - prev[1]
+        if dt <= 0:
+            return None
+        return max(0.0, min(100.0, 100.0 * (1.0 - di / dt)))
+    except Exception:
+        return None
+
+
+def _sample_ram() -> float | None:
+    """Return physical memory load 0-100 (GlobalMemoryStatusEx)."""
+    try:
+        class _MEMORYSTATUSEX(ctypes.Structure):
+            _fields_ = [("dwLength", wintypes.DWORD),
+                        ("dwMemoryLoad", wintypes.DWORD),
+                        ("ullTotalPhys", ctypes.c_ulonglong),
+                        ("ullAvailPhys", ctypes.c_ulonglong),
+                        ("ullTotalPageFile", ctypes.c_ulonglong),
+                        ("ullAvailPageFile", ctypes.c_ulonglong),
+                        ("ullTotalVirtual", ctypes.c_ulonglong),
+                        ("ullAvailVirtual", ctypes.c_ulonglong),
+                        ("ullAvailExtendedVirtual", ctypes.c_ulonglong)]
+        ms = _MEMORYSTATUSEX()
+        ms.dwLength = ctypes.sizeof(ms)
+        if not ctypes.windll.kernel32.GlobalMemoryStatusEx(ctypes.byref(ms)):
+            return None
+        return float(ms.dwMemoryLoad)
+    except Exception:
+        return None
+
+
+# ── Search tab helpers ────────────────────────────────────
+
+# Directories the Search tab never descends into (noise / huge).
+# Dot-prefixed dirs (.git, .venv, ...) are skipped separately.
+_GREP_SKIP_DIRS = {"__pycache__", "node_modules", "venv",
+                   "$recycle.bin", "system volume information"}
+
+_vscode_cmd: str | None = None   # resolved on first use; "" = not installed
+
+
+def _open_in_editor(path: str, lineno: int = 1) -> None:
+    """Open a file at a line in VS Code when available, else the default app."""
+    global _vscode_cmd
+    if _vscode_cmd is None:
+        import shutil
+        _vscode_cmd = shutil.which("code") or ""
+    if _vscode_cmd:
+        try:
+            subprocess.Popen([_vscode_cmd, "-g", f"{path}:{lineno}"],
+                             creationflags=subprocess.CREATE_NO_WINDOW)
+            return
+        except OSError:
+            pass
+    try:
+        os.startfile(path)
+    except OSError:
+        pass
+
+
 # ── Icon generation ───────────────────────────────────────
 
 def _icon_png_jelly(palette: dict | None = None) -> str:
@@ -583,12 +694,50 @@ def _mask_drop(md, S):
     md.polygon([(c, S * 0.07), (S * 0.77, S * 0.56), (S * 0.23, S * 0.56)], fill=255)
 
 
+def _mask_heart(md, S):
+    # two round lobes + V bottom
+    md.ellipse([S * 0.08, S * 0.14, S * 0.56, S * 0.62], fill=255)
+    md.ellipse([S * 0.44, S * 0.14, S * 0.92, S * 0.62], fill=255)
+    md.polygon([(S * 0.115, S * 0.46), (S * 0.885, S * 0.46),
+                (S * 0.50, S * 0.92)], fill=255)
+
+
+def _mask_star(md, S):
+    import math
+    c, R, r = S / 2, S * 0.48, S * 0.22   # plump inner radius = cute
+    pts = []
+    for i in range(10):
+        a = -math.pi / 2 + i * math.pi / 5
+        rad = R if i % 2 == 0 else r
+        pts.append((c + rad * math.cos(a), c + rad * math.sin(a)))
+    md.polygon(pts, fill=255)
+
+
+def _mask_moon(md, S):
+    m = int(S * 0.08)
+    md.ellipse([m, m, S - m, S - m], fill=255)
+    # bite out the upper-right to leave a crescent
+    md.ellipse([S * 0.30, -S * 0.18, S * 1.12, S * 0.64], fill=0)
+
+
+def _mask_cloud(md, S):
+    md.ellipse([S * 0.06, S * 0.38, S * 0.50, S * 0.80], fill=255)
+    md.ellipse([S * 0.26, S * 0.20, S * 0.74, S * 0.70], fill=255)
+    md.ellipse([S * 0.50, S * 0.38, S * 0.94, S * 0.80], fill=255)
+    md.rounded_rectangle([S * 0.14, S * 0.52, S * 0.86, S * 0.80],
+                         radius=int(S * 0.14), fill=255)
+
+
 _ICON_MASKS = {
     "rounded": _mask_rounded,
     "ring":    _mask_ring,
     "hexagon": _mask_hexagon,
     "spark":   _mask_spark,
     "drop":    _mask_drop,
+    "heart":   _mask_heart,
+    "star":    _mask_star,
+    "moon":    _mask_moon,
+    "cloud":   _mask_cloud,
 }
 
 # Selectable icon designs (key, label) shown in the settings menu.
@@ -599,6 +748,10 @@ ICON_SHAPES = [
     ("spark",   "Spark"),
     ("drop",    "Drop"),
     ("jelly",   "Jelly"),
+    ("heart",   "Heart"),
+    ("star",    "Star"),
+    ("moon",    "Moon"),
+    ("cloud",   "Cloud"),
 ]
 
 
@@ -1406,8 +1559,9 @@ class TaskDialog(tk.Toplevel):
             activestyle="none",
         )
         self._wf_lb.pack(side="left", fill="both", expand=True)
-        _wf_sb = tk.Scrollbar(wf_lb_frame, orient="vertical",
-                              command=self._wf_lb.yview)
+        _wf_sb = ttk.Scrollbar(wf_lb_frame, orient="vertical",
+                               style="Gem.Vertical.TScrollbar",
+                               command=self._wf_lb.yview)
         _wf_sb_pack = dict(side="right", fill="y")
         self._wf_lb.configure(yscrollcommand=lambda lo, hi:
                               _autohide_scrollbar(_wf_sb, lo, hi, _wf_sb_pack))
@@ -2268,8 +2422,10 @@ class FileScanWindow(tk.Toplevel):
             anchor = "w" if key == "path" else "e"
             self._tree.column(key, width=width, anchor=anchor, stretch=(key == "path"))
 
-        vsb = ttk.Scrollbar(tree_frame, orient="vertical",   command=self._tree.yview)
-        hsb = ttk.Scrollbar(tree_frame, orient="horizontal", command=self._tree.xview)
+        vsb = ttk.Scrollbar(tree_frame, orient="vertical",
+                            style="Gem.Vertical.TScrollbar", command=self._tree.yview)
+        hsb = ttk.Scrollbar(tree_frame, orient="horizontal",
+                            style="Gem.Horizontal.TScrollbar", command=self._tree.xview)
         _vpack = dict(side="right",  fill="y")
         _hpack = dict(side="bottom", fill="x")
         self._tree.configure(
@@ -2443,6 +2599,7 @@ class NotificationPopup(tk.Toplevel):
 
     FADE_MS    = 350    # fade in/out duration (ms)
     FADE_STEPS = 14     # number of fade steps
+    SLIDE_PX   = 46     # horizontal slide-in distance (px)
 
     def __init__(self, parent, task: dict, display_ms: int = 8000):
         super().__init__(parent)
@@ -2566,7 +2723,9 @@ class NotificationPopup(tk.Toplevel):
         w  = max(self.winfo_reqwidth(), 280)
         h  = max(self.winfo_reqheight(), 80)
         ml, mt, mr, mb = _get_monitor_work_area(parent)
-        self.geometry(f"{w}x{h}+{mr - w - 20}+{mb - h - 12}")
+        self._fx = mr - w - 20   # final position; slide in from the right
+        self._fy = mb - h - 12
+        self.geometry(f"{w}x{h}+{self._fx + self.SLIDE_PX}+{self._fy}")
 
         # click to close
         for widget in (self, inner, content, hdr, hdr_l, hdr_r):
@@ -2575,15 +2734,19 @@ class NotificationPopup(tk.Toplevel):
         # start animation
         self._start  = time.monotonic()
         self._pb_rect = None
+        self._anim_step = 0
         self._fade_in()
 
     def _fade_in(self):
-        a = float(self.attributes("-alpha")) + 1.0 / self.FADE_STEPS
-        self.attributes("-alpha", min(1.0, a))
-        if a < 1.0:
+        # slide in from the right (ease-out) while fading in
+        self._anim_step += 1
+        k = min(1.0, self._anim_step / self.FADE_STEPS)
+        ease = 1 - (1 - k) ** 3
+        self.geometry(f"+{round(self._fx + (1 - ease) * self.SLIDE_PX)}+{self._fy}")
+        self.attributes("-alpha", k)
+        if k < 1.0:
             self.after(self.FADE_MS // self.FADE_STEPS, self._fade_in)
         else:
-            self.attributes("-alpha", 1.0)
             pw = max(self._pb.winfo_width(), self.winfo_width())
             self._pb_rect = self._pb.create_rectangle(
                 0, 0, pw, 6,
@@ -2604,8 +2767,11 @@ class NotificationPopup(tk.Toplevel):
             self._fade_out()
 
     def _fade_out(self):
+        # slide back toward the edge (ease-in) while fading out
         a = float(self.attributes("-alpha")) - 1.0 / self.FADE_STEPS
         self.attributes("-alpha", max(0.0, a))
+        ease = (1.0 - max(0.0, a)) ** 2
+        self.geometry(f"+{round(self._fx + ease * self.SLIDE_PX)}+{self._fy}")
         if a > 0:
             self.after(self.FADE_MS // self.FADE_STEPS, self._fade_out)
         else:
@@ -2742,8 +2908,9 @@ class NotifyDialog(tk.Toplevel):
             activestyle="none",
         )
         self._paths_lb.pack(side="left", fill="both", expand=True)
-        _sb = tk.Scrollbar(lb_frame, orient="vertical",
-                           command=self._paths_lb.yview)
+        _sb = ttk.Scrollbar(lb_frame, orient="vertical",
+                            style="Gem.Vertical.TScrollbar",
+                            command=self._paths_lb.yview)
         _sb_pack = dict(side="right", fill="y")
         self._paths_lb.configure(yscrollcommand=lambda lo, hi:
                                  _autohide_scrollbar(_sb, lo, hi, _sb_pack))
@@ -3317,10 +3484,14 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._conn_ping_dots:    dict[str, list]        = {}  # host -> [Canvas, ...]
         self._conn_ping_running: set[str]               = set()   # after IDs for dashboard auto-refresh
         self._conn_ping_enabled: bool = True   # Terminal ping dot ON/OFF
+        self._hud_cpu: deque = deque(maxlen=60)   # last 60s of CPU samples (%)
+        self._hud_ram: deque = deque(maxlen=60)   # last 60s of RAM load (%)
         self._save_after_id = None             # after ID for debounced config save
         self._pill_font_cache: dict = {}       # (font tuple) -> tkfont.Font, for tab width measurement
         self._load_config()
         self._backup_config_daily()
+        self._cleanup_old_logs()
+        _style_flat_scrollbars(self)   # theme colors are resolved above
 
         # generate icon after theme is resolved
         palette = ICON_PALETTES.get(self._theme)
@@ -3341,6 +3512,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._grep_folder: str = ""
         self._grep_query:  str = ""
         self._grep_ext:    str = ""
+        self._grep_history: list[str] = []   # recent queries, newest first
         self._grep_running: bool = False
         self._grep_cancel:  bool = False
 
@@ -3359,6 +3531,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._check_recurring_tasks()
         self.bind("<Control-k>", self._open_command_palette)
         self._setup_win_integration()
+        # deferred: the WM frame window exists only after mapping
+        self.after(50, lambda: _apply_titlebar_theme(self))
+        self._pulse_loop()   # ping-dot glow animation (independent of _tick)
 
     # ── Config read/write (unified in config.json) ─────────────────
 
@@ -3466,6 +3641,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._grep_folder = cfg.get("grep_folder", "")
         self._grep_query  = cfg.get("grep_query",  "")
         self._grep_ext    = cfg.get("grep_ext",    "")
+        self._grep_history = [str(x) for x in cfg.get("grep_history", [])][:10]
 
         # theme settings
         self._theme = cfg.get("theme", "plush")
@@ -3483,6 +3659,12 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
         # Tasks tab: hide completed tasks
         self._task_hide_done = bool(cfg.get("task_hide_done", False))
+
+        # terminal log auto-cleanup: keep logs for N days (0 = disabled)
+        try:
+            self._log_keep_days = max(0, int(cfg.get("log_keep_days", 30)))
+        except (TypeError, ValueError):
+            self._log_keep_days = 30
 
         # save to config.json when migrating from legacy files
         if migrated:
@@ -3532,7 +3714,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             "grep_folder":     self._grep_folder,
             "grep_query":      self._grep_query,
             "grep_ext":        self._grep_ext,
+            "grep_history":    getattr(self, "_grep_history", []),
             "task_hide_done":  getattr(self, "_task_hide_done", False),
+            "log_keep_days":   getattr(self, "_log_keep_days", 30),
             "pinned_tabs":   self._pinned_tabs,
             "rules":         self._rules,
             "active_work":   self._active_work_record(),
@@ -3709,10 +3893,27 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         # 1px border below header
         tk.Frame(self, bg=C["accent_dk"], height=1).pack(fill="x")
 
+        # instrument-panel clock: time + date/weekday in mono, stacked
         self._clock_var = tk.StringVar()
-        tk.Label(hdr, textvariable=self._clock_var,
+        self._date_var  = tk.StringVar()
+        _clk = tk.Frame(hdr, bg=C["accent"])
+        _clk.pack(side="left", padx=(6, 0))
+        tk.Label(_clk, textvariable=self._clock_var,
+                 bg=C["accent"], fg="white",
+                 font=FONT_MONO, anchor="w").pack(fill="x")
+        tk.Label(_clk, textvariable=self._date_var,
                  bg=C["accent"], fg=C["accent_lt"],
-                 font=FONT_MONO).pack(side="left", padx=6)
+                 font=(FONT_MONO[0], max(7, FONT_BASE - 3)),
+                 anchor="w").pack(fill="x")
+
+        # HUD: CPU/RAM sparkline + readout (fed by _tick)
+        self._hud_cv = tk.Canvas(hdr, width=56, height=24,
+                                 bg=C["accent"], highlightthickness=0)
+        self._hud_cv.pack(side="left", padx=(8, 0))
+        self._hud_lbl = tk.Label(hdr, text="", justify="left", anchor="w",
+                                 bg=C["accent"], fg=C["accent_lt"],
+                                 font=(FONT_MONO[0], max(7, FONT_BASE - 3)))
+        self._hud_lbl.pack(side="left", padx=(3, 0))
 
         # Banner notification label
         self._banner_lbl = tk.Label(
@@ -3803,6 +4004,19 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                           command=_edit_notify_sec)
             m.add_separator()
 
+            # Terminal log auto-cleanup
+            log_sub = tk.Menu(m, tearoff=0,
+                              bg=C["card"], fg=C["text"],
+                              activebackground=C["card_h"], activeforeground=C["text"],
+                              relief="flat", font=FONT_SMALL)
+            for d in (0, 7, 14, 30, 90):
+                prefix = "* " if self._log_keep_days == d else "  "
+                label = "Off" if d == 0 else f"Keep {d} days"
+                log_sub.add_command(label=prefix + label,
+                                    command=lambda v=d: self._set_log_keep_days(v))
+            m.add_cascade(label="Log cleanup", menu=log_sub)
+            m.add_separator()
+
             # Pin on top
             is_top = bool(self.attributes("-topmost"))
             def _toggle_topmost():
@@ -3846,6 +4060,18 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                     label=f"{prefix}{pt}pt",
                     command=lambda p=pt: self._set_font_size(p))
             m.add_cascade(label="Font size", menu=font_sub)
+
+            # Font family submenu
+            fam_sub = tk.Menu(m, tearoff=0,
+                              bg=C["card"], fg=C["text"],
+                              activebackground=C["card_h"], activeforeground=C["text"],
+                              relief="flat", font=FONT_SMALL)
+            for fam in ("Segoe UI", "Bahnschrift", "Consolas"):
+                prefix = "* " if self._font_family == fam else "  "
+                fam_sub.add_command(
+                    label=f"{prefix}{fam}",
+                    command=lambda f=fam: self._set_font_family(f))
+            m.add_cascade(label="Font family", menu=fam_sub)
 
             # Transparency
             m.add_command(label="Transparency...", command=self._open_transparency_dialog)
@@ -3895,7 +4121,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         wrapper.pack(fill="both", expand=True, padx=4, pady=3)
 
         canvas = tk.Canvas(wrapper, bg=C["bg"], highlightthickness=0)
-        scrollbar = tk.Scrollbar(wrapper, orient="vertical", command=canvas.yview)
+        scrollbar = ttk.Scrollbar(wrapper, orient="vertical",
+                                  style="Gem.Vertical.TScrollbar",
+                                  command=canvas.yview)
         self._list_frame = tk.Frame(canvas, bg=C["bg"])
         self._list_frame.bind(
             "<Configure>",
@@ -4943,7 +5171,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             dot_color = {"ok": "#4caf50", "fail": C["btn_del"]}.get(status, C["border"])
             dot_cv = tk.Canvas(card, width=12, height=12, bg=C["card"], highlightthickness=0)
             dot_cv.pack(side="right", padx=(0, 6))
-            dot_cv.create_oval(1, 1, 11, 11, fill=dot_color, outline="")
+            dot_cv.create_oval(1, 1, 11, 11, fill=dot_color, outline="", tags="dot")
             self._conn_ping_dots.setdefault(host, []).append(dot_cv)
 
         for widget in (card, left) + tuple(left.winfo_children()):
@@ -4979,7 +5207,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         for cv in self._conn_ping_dots.get(host, []):
             try:
                 cv.delete("all")
-                cv.create_oval(1, 1, 11, 11, fill=color, outline="")
+                cv.create_oval(1, 1, 11, 11, fill=color, outline="", tags="dot")
             except tk.TclError:
                 pass  # widget already destroyed
 
@@ -5587,9 +5815,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         tk.Label(row2, text="Query", bg=C["bg"], fg=C["text_sub"],
                  font=FONT_SMALL, width=7, anchor="w").pack(side="left")
         query_var = tk.StringVar(value=self._grep_query)
-        query_e = tk.Entry(row2, textvariable=query_var, font=FONT,
-                           bg=C["card"], fg=C["text"], relief="flat", bd=1,
-                           insertbackground=C["accent"])
+        query_e = ttk.Combobox(row2, textvariable=query_var, font=FONT,
+                               values=self._grep_history)
         query_e.pack(side="left", fill="x", expand=True, padx=(0, 4))
         case_var = tk.BooleanVar(value=True)
         tk.Checkbutton(row2, text="Ignore case", variable=case_var,
@@ -5635,7 +5862,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         res_outer = tk.Frame(f, bg=C["bg"])
         res_outer.pack(fill="both", expand=True)
         res_cv = tk.Canvas(res_outer, bg=C["bg"], highlightthickness=0)
-        res_vsb = tk.Scrollbar(res_outer, orient="vertical", command=res_cv.yview)
+        res_vsb = ttk.Scrollbar(res_outer, orient="vertical",
+                                style="Gem.Vertical.TScrollbar",
+                                command=res_cv.yview)
         res_frame = tk.Frame(res_cv, bg=C["bg"])
         res_frame.bind("<Configure>",
                        lambda e: res_cv.configure(scrollregion=res_cv.bbox("all")))
@@ -5651,6 +5880,19 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
         q = _queue.Queue()
         self._grep_cancel = False
+        results: list[dict] = []   # all matches of the last run (for export)
+
+        def _copy(text: str):
+            self.clipboard_clear()
+            self.clipboard_append(text)
+
+        def _result_menu(parent, items):
+            menu = tk.Menu(parent, tearoff=0, bg=C["card"], fg=C["text"],
+                           activebackground=C["card_h"], activeforeground=C["text"],
+                           relief="flat", font=FONT_SMALL)
+            for label, cmd in items:
+                menu.add_command(label=label, command=cmd)
+            return menu
 
         def _append_file_header(rel_path, abs_path):
             hdr = tk.Frame(res_frame, bg=C["bg"])
@@ -5658,19 +5900,49 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             lbl = tk.Label(hdr, text=rel_path, bg=C["bg"], fg=C["accent"],
                            font=FONT_BOLD, anchor="w", cursor="hand2")
             lbl.pack(side="left", fill="x", expand=True)
-            lbl.bind("<Button-1>", lambda e, p=abs_path: os.startfile(os.path.dirname(p)))
+            menu = _result_menu(hdr, [
+                ("Open folder", lambda: os.startfile(os.path.dirname(abs_path))),
+                ("Copy path",   lambda: _copy(abs_path)),
+            ])
+            lbl.bind("<Button-1>", lambda e: _open_in_editor(abs_path))
+            lbl.bind("<Button-3>", lambda e: self._popup_menu(menu, e.x_root, e.y_root))
 
-        def _append_match(lineno: int, line_text: str):
+        def _append_match(m: dict):
+            text, mstart, mlen = m["text"], m["mstart"], m["mlen"]
+            # window long lines so the hit stays visible
+            if mstart > 60:
+                cut = mstart - 40
+                text = "…" + text[cut:]
+                mstart -= cut - 1
+            prefix = text[:mstart]
+            hit    = text[mstart:mstart + mlen]
+            suffix = text[mstart + mlen:][:160]
+
             row = tk.Frame(res_frame, bg=C["card"],
                            highlightthickness=1, highlightbackground=C["border"])
             row.pack(fill="x", padx=4, pady=1)
-            tk.Label(row, text=f"{lineno:5d}", bg=C["card"], fg=C["text_sub"],
-                     font=("Consolas", max(7, FONT_BASE - 2)),
-                     anchor="e", width=6).pack(side="left")
+            mono = ("Consolas", max(7, FONT_BASE - 2))
+            tk.Label(row, text=f"{m['lineno']:5d}", bg=C["card"], fg=C["text_sub"],
+                     font=mono, anchor="e", width=6).pack(side="left")
             tk.Frame(row, bg=C["border"], width=1).pack(side="left", fill="y")
-            tk.Label(row, text=line_text[:200], bg=C["card"], fg=C["text"],
-                     font=("Consolas", max(7, FONT_BASE - 2)),
-                     anchor="w").pack(side="left", padx=6, fill="x", expand=True)
+            tk.Label(row, text=prefix, bg=C["card"], fg=C["text"],
+                     font=mono, anchor="w").pack(side="left", padx=(6, 0))
+            if hit:
+                tk.Label(row, text=hit, bg=C["accent"], fg="white",
+                         font=mono, anchor="w").pack(side="left")
+            tk.Label(row, text=suffix, bg=C["card"], fg=C["text"],
+                     font=mono, anchor="w").pack(side="left", fill="x", expand=True)
+
+            path, ln = m["abs"], m["lineno"]
+            menu = _result_menu(row, [
+                ("Copy line",      lambda: _copy(m["text"])),
+                ("Copy path:line", lambda: _copy(f"{path}:{ln}")),
+                ("Open folder",    lambda: os.startfile(os.path.dirname(path))),
+            ])
+            for w in (row,) + tuple(row.winfo_children()):
+                w.bind("<Button-1>", lambda e: _open_in_editor(path, ln))
+                w.bind("<Button-3>", lambda e: self._popup_menu(menu, e.x_root, e.y_root))
+                w.configure(cursor="hand2")
 
         def _poll():
             try:
@@ -5680,27 +5952,33 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                     if kind == "file":
                         _append_file_header(item[1], item[2])
                     elif kind == "match":
-                        _append_match(item[1], item[2])
+                        results.append(item[1])
+                        _append_match(item[1])
                     elif kind == "status":
                         status_var.set(item[1])
                     elif kind == "done":
-                        _on_done(item[1], item[2], item[3])
+                        _on_done(item[1], item[2], item[3], item[4])
                         return
             except _queue.Empty:
                 pass
             if self._grep_running:
                 self.after(60, _poll)
 
-        def _on_done(cancelled: bool, file_count: int, match_count: int):
+        def _on_done(cancelled: bool, file_count: int, match_count: int,
+                     limited: bool):
             self._grep_running = False
             search_btn.configure(text="Search", command=_start_search,
                                  bg=C["accent"])
+            export_btn.configure(state="normal" if results else "disabled")
             if cancelled:
                 status_var.set(f"Cancelled — {file_count} file(s), {match_count} match(es)")
             elif match_count == 0:
                 status_var.set("No matches found.")
                 tk.Label(res_frame, text="No matches found.",
                          bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL).pack(pady=20)
+            elif limited:
+                status_var.set(f"Stopped at {match_count} matches (limit) — "
+                               f"{file_count} file(s)")
             else:
                 status_var.set(f"Done — {file_count} file(s), {match_count} match(es)")
 
@@ -5714,17 +5992,24 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 exts.add(token)
             return exts
 
+        MAX_MATCHES   = 500                 # widget count stays bounded
+        MAX_FILE_SIZE = 10 * 1024 * 1024    # skip files larger than 10MB
+
         def _search_thread(folder: str, query: str, ignore_case: bool,
                            exts: set[str], mode: str):
             file_count = 0
             match_count = 0
+            limited = False
+            cq = query.lower() if ignore_case else query
             try:
                 for root, dirs, files in os.walk(folder):
-                    if self._grep_cancel:
+                    if self._grep_cancel or limited:
                         break
-                    dirs[:] = sorted(d for d in dirs if not d.startswith('.'))
+                    dirs[:] = sorted(d for d in dirs
+                                     if not d.startswith('.')
+                                     and d.lower() not in _GREP_SKIP_DIRS)
                     for filename in sorted(files):
-                        if self._grep_cancel:
+                        if self._grep_cancel or limited:
                             break
                         # Extension filter
                         if exts:
@@ -5732,8 +6017,18 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                             if ext.lower() not in exts:
                                 continue
                         filepath = os.path.join(root, filename)
+                        try:
+                            if os.path.getsize(filepath) > MAX_FILE_SIZE:
+                                continue
+                            with open(filepath, "rb") as fh:
+                                # NUL byte in the head = binary; latin-1 below
+                                # would otherwise happily "decode" any file
+                                if b"\x00" in fh.read(8192):
+                                    continue
+                        except OSError:
+                            continue
                         rel = os.path.relpath(filepath, folder)
-                        file_matches: list[tuple[int, str]] = []
+                        file_matches: list[dict] = []
                         try:
                             lines = None
                             for enc in ("utf-8", "shift-jis", "latin-1"):
@@ -5745,29 +6040,40 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                                     continue
                             if lines is None:
                                 continue
-                            cq = query.lower() if ignore_case else query
                             for lineno, line in enumerate(lines, 1):
-                                cl = line.lower() if ignore_case else line
-                                stripped = cl.rstrip("\r\n")
+                                raw = line.rstrip("\r\n")
+                                cl  = raw.lower() if ignore_case else raw
+                                mstart = -1
                                 if mode == "starts":
-                                    hit = stripped.lstrip().startswith(cq)
+                                    ls = cl.lstrip()
+                                    if ls.startswith(cq):
+                                        mstart = len(cl) - len(ls)
                                 elif mode == "ends":
-                                    hit = stripped.rstrip().endswith(cq)
+                                    rs = cl.rstrip()
+                                    if rs.endswith(cq):
+                                        mstart = len(rs) - len(cq)
                                 else:
-                                    hit = cq in cl
-                                if hit:
-                                    file_matches.append((lineno, line.rstrip()))
+                                    mstart = cl.find(cq)
+                                if mstart >= 0:
+                                    file_matches.append(
+                                        {"rel": rel, "abs": filepath,
+                                         "lineno": lineno, "text": raw,
+                                         "mstart": mstart, "mlen": len(cq)})
                         except Exception:
                             continue
                         if file_matches:
+                            room = MAX_MATCHES - match_count
+                            if len(file_matches) >= room:
+                                file_matches = file_matches[:room]
+                                limited = True
                             file_count += 1
                             match_count += len(file_matches)
                             q.put(("file", rel, filepath))
-                            for ln, lc in file_matches:
-                                q.put(("match", ln, lc))
+                            for m in file_matches:
+                                q.put(("match", m))
                             q.put(("status", f"Searching… {file_count} file(s), {match_count} match(es)"))
             finally:
-                q.put(("done", self._grep_cancel, file_count, match_count))
+                q.put(("done", self._grep_cancel, file_count, match_count, limited))
 
         def _start_search():
             folder = folder_var.get().strip()
@@ -5784,9 +6090,18 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             self._grep_folder = folder
             self._grep_query  = query
             self._grep_ext    = ext_var.get().strip()
+            # query history: newest first, deduplicated, max 10
+            h = self._grep_history
+            if query in h:
+                h.remove(query)
+            h.insert(0, query)
+            del h[10:]
+            query_e["values"] = h
             self._save_config()
             for w in res_frame.winfo_children():
                 w.destroy()
+            results.clear()
+            export_btn.configure(state="disabled")
             self._grep_cancel  = False
             self._grep_running = True
             search_btn.configure(text="Cancel", command=_cancel_search,
@@ -5802,11 +6117,50 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             self._grep_cancel = True
             status_var.set("Cancelling…")
 
+        def _export_results():
+            if not results:
+                return
+            ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+            path = filedialog.asksaveasfilename(
+                parent=self, title="Export search results",
+                defaultextension=".txt",
+                initialfile=f"search_{ts}.txt",
+                filetypes=[("Text files", "*.txt"), ("CSV files", "*.csv"),
+                           ("All files", "*.*")])
+            if not path:
+                return
+            if path.lower().endswith(".csv"):
+                import csv
+                with open(path, "w", newline="", encoding="utf-8-sig") as fh:
+                    w = csv.writer(fh)
+                    w.writerow(["file", "line", "text"])
+                    for m in results:
+                        w.writerow([m["abs"], m["lineno"], m["text"]])
+            else:
+                out = [f"Query : {self._grep_query}",
+                       f"Folder: {self._grep_folder}",
+                       f"Date  : {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}",
+                       ""]
+                cur = None
+                for m in results:
+                    if m["rel"] != cur:
+                        cur = m["rel"]
+                        out.append(cur)
+                    out.append(f"  {m['lineno']:5d}: {m['text']}")
+                Path(path).write_text("\n".join(out), encoding="utf-8-sig")
+            status_var.set(f"Exported {len(results)} match(es).")
+
         search_btn = tk.Button(row3, text="Search", command=_start_search,
                                bg=C["accent"], fg="white", relief="flat", bd=0,
                                font=FONT_BOLD, cursor="hand2", padx=16, pady=3,
                                activebackground=C["accent_dk"], activeforeground="white")
         search_btn.pack(side="right")
+        export_btn = tk.Button(row3, text="Export", command=_export_results,
+                               state="disabled",
+                               bg=C["card"], fg=C["text_sub"], relief="flat", bd=0,
+                               font=FONT_SMALL, cursor="hand2", padx=10, pady=4,
+                               activebackground=C["card_h"], activeforeground=C["text"])
+        export_btn.pack(side="right", padx=(0, 6))
         query_e.bind("<Return>", lambda e: _start_search())
         query_e.focus_set()
 
@@ -6141,7 +6495,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 tree.column("remaining", width=68,  minwidth=55,  stretch=False)
                 tree.column("updated",   width=82,  minwidth=70,  stretch=False)
 
-        vsb = ttk.Scrollbar(tree_wrap, orient="vertical", command=tree.yview)
+        vsb = ttk.Scrollbar(tree_wrap, orient="vertical",
+                            style="Gem.Vertical.TScrollbar", command=tree.yview)
         _vsb_pack = dict(side="right", fill="y")
         tree.configure(yscrollcommand=lambda lo, hi:
                        _autohide_scrollbar(vsb, lo, hi, _vsb_pack))
@@ -6204,10 +6559,13 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                     sub_pct = 100 if sub.get("done") else sub.get("progress", 0)
                     sub_dl  = sub.get("deadline", "")
                     sub_rem = _days_left_str(sub_dl)
+                    # title goes in the process column (under the parent's
+                    # name), not in #0 which sits left of the parent
                     tree.insert(task_iid, "end", iid=f"{i}.{si}",
-                                text=sub.get("title", ""),
+                                text="",
                                 tags=(_progress_tag(sub_pct),),
-                                values=("", "", f"{sub_pct}%", sub_dl, sub_rem, ""))
+                                values=(f"└ {sub.get('title', '')}", "",
+                                        f"{sub_pct}%", sub_dl, sub_rem, ""))
 
         # detail panel (show full text of selected row)
         tk.Frame(self._list_frame, bg=C["border"], height=1).pack(
@@ -6363,7 +6721,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                           ).pack(side="right")
 
         tree.bind("<<TreeviewSelect>>", on_select)
-        tree.bind("<Double-1>",  lambda e: self._task_tree_edit(tree))
+        tree.bind("<Double-1>",  lambda e: self._task_tree_edit(tree, e))
         tree.bind("<Button-3>",  lambda e: self._task_tree_menu(e, tree))
         tree.bind("<Delete>",    lambda e: self._task_tree_delete(tree))
 
@@ -6469,11 +6827,21 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
         self._render_task_archived_section()
 
-    def _task_tree_edit(self, tree):
-        sel = tree.selection()
-        if not sel:
-            return
-        iid = sel[0]
+    def _task_tree_edit(self, tree, event=None):
+        if event is not None:
+            # rapid clicks on the expand/collapse arrow arrive as Double-1;
+            # they must not open an editor for whatever row was selected
+            if "indicator" in tree.identify("element", event.x, event.y):
+                return "break"
+            row = tree.identify_row(event.y)
+            if not row:
+                return   # double-click on empty space below the rows
+            iid = row    # edit the row under the cursor, not a stale selection
+        else:
+            sel = tree.selection()
+            if not sel:
+                return
+            iid = sel[0]
         if "." in iid:
             task_idx, sub_idx = map(int, iid.split("."))
             self._edit_subtask(task_idx, sub_idx)
@@ -7468,6 +7836,32 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         except Exception:
             pass
 
+    def _cleanup_old_logs(self):
+        """Delete terminal logs in LOG_DIR older than _log_keep_days (by mtime).
+
+        0 days = disabled. Runs in a background thread so a slow/locked
+        disk never delays startup; files in use are silently skipped.
+        """
+        days = getattr(self, "_log_keep_days", 0)
+        if days <= 0 or not LOG_DIR.exists():
+            return
+
+        def _work():
+            cutoff = time.time() - days * 86400
+            for f in LOG_DIR.glob("*.log"):
+                try:
+                    if f.stat().st_mtime < cutoff:
+                        f.unlink()
+                except OSError:
+                    pass   # locked by a live Tera Term session, etc.
+
+        threading.Thread(target=_work, daemon=True).start()
+
+    def _set_log_keep_days(self, days: int):
+        self._log_keep_days = days
+        self._save_config()
+        self._cleanup_old_logs()   # apply the new retention immediately
+
     # ── Start with Windows ────────────────────────────────
 
     _RUN_KEY = r"Software\Microsoft\Windows\CurrentVersion\Run"
@@ -7526,7 +7920,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         wrapper = tk.Frame(win, bg=C["bg"])
         wrapper.pack(fill="both", expand=True, padx=8, pady=6)
         cv = tk.Canvas(wrapper, bg=C["bg"], highlightthickness=0)
-        sb = tk.Scrollbar(wrapper, orient="vertical", command=cv.yview)
+        sb = ttk.Scrollbar(wrapper, orient="vertical",
+                           style="Gem.Vertical.TScrollbar", command=cv.yview)
         body = tk.Frame(cv, bg=C["bg"])
         body.bind("<Configure>",
                   lambda e: cv.configure(scrollregion=cv.bbox("all")))
@@ -7850,6 +8245,24 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                         for ml in m_content.splitlines():
                             if ml.strip():
                                 lines.append(f"　　　　{ml}" if ja else f"      {ml}")
+                subs = task.get("subtasks", [])
+                if subs:
+                    done_n = sum(1 for s in subs if s.get("done"))
+                    lines.append(f"　　サブタスク（{done_n}/{len(subs)} 完了）" if ja
+                                 else f"    Subtasks ({done_n}/{len(subs)} done)")
+                    for sub in subs:
+                        mark  = "[x]" if sub.get("done") else "[ ]"
+                        s_dl  = sub.get("deadline", "")
+                        info  = []
+                        if not sub.get("done"):
+                            info.append(f"{sub.get('progress', 0)}%")
+                        if s_dl:
+                            info.append(f"{fmt_date(s_dl)}（{deadline_note(s_dl)}）" if ja
+                                        else f"{fmt_date(s_dl)} ({deadline_note(s_dl)})")
+                        suffix = ((("　" + "・".join(info)) if ja
+                                   else ("  " + ", ".join(info))) if info else "")
+                        lines.append((f"　　　{mark} {sub.get('title', '')}{suffix}") if ja
+                                     else f"      {mark} {sub.get('title', '')}{suffix}")
             lines.append("")
 
         Path(save_path).write_text("\n".join(lines), encoding="utf-8-sig")
@@ -8240,6 +8653,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             return
         self._theme = theme_name
         C.update(THEMES[theme_name])
+        _style_flat_scrollbars(self)
         self._save_config()
 
         # cancel the _tick() after loop (prevent double loop)
@@ -8254,21 +8668,122 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self.wm_iconphoto(True, self._icon)
         _setup_taskbar_icon(self, palette, getattr(self, "_icon_shape", "jelly"))
 
-        # destroy all widgets and rebuild
-        for w in self.winfo_children():
-            w.destroy()
-        self.configure(bg=C["bg"])
+        # destroy all widgets and rebuild, with a soft alpha cross-fade
+        def _do_rebuild():
+            for w in self.winfo_children():
+                w.destroy()
+            self.configure(bg=C["bg"])
+            self._build_ui()
+            self._render_tabs()
+            self._render_list()
+            _apply_titlebar_theme(self)
+        self._fade_transition(_do_rebuild)
 
-        self._build_ui()
-        self._render_tabs()
-        self._render_list()
+    def _fade_transition(self, rebuild_fn):
+        """Dip the window alpha around a full rebuild for a cross-fade feel.
+
+        Blocks the UI thread for ~200ms, which is acceptable for a
+        user-initiated theme switch; restores the user's configured alpha.
+        """
+        try:
+            base = float(self.attributes("-alpha"))
+        except tk.TclError:
+            base = 1.0
+        steps = 5
+        try:
+            for i in range(1, steps + 1):
+                self.attributes("-alpha", base * (1 - 0.75 * i / steps))
+                self.update_idletasks()
+                time.sleep(0.018)
+            rebuild_fn()
+            self.update_idletasks()
+            for i in range(1, steps + 1):
+                self.attributes("-alpha", base * (0.25 + 0.75 * i / steps))
+                self.update_idletasks()
+                time.sleep(0.018)
+        finally:
+            self.attributes("-alpha", base)
 
     # ── Other ─────────────────────────────────────────────
 
     def _tick(self):
-        self._clock_var.set(datetime.datetime.now().strftime("%H:%M:%S"))
+        now = datetime.datetime.now()
+        self._clock_var.set(now.strftime("%H:%M:%S"))
+        self._date_var.set(now.strftime("%m/%d %a").upper())
+        self._update_hud()
         self._update_banner()
         self._tick_id = self.after(1000, self._tick)
+
+    def _is_visible(self) -> bool:
+        """False while minimized or hidden in the tray."""
+        try:
+            return self.state() in ("normal", "zoomed")
+        except tk.TclError:
+            return False
+
+    def _update_hud(self):
+        """Sample CPU/RAM and redraw the header sparkline + readout."""
+        if not self._is_visible():
+            return   # nobody is looking; GetSystemTimes is cumulative, so
+                     # the first sample after restore averages the gap
+        cpu, ram = _sample_cpu(), _sample_ram()
+        if cpu is not None:
+            self._hud_cpu.append(cpu)
+        if ram is not None:
+            self._hud_ram.append(ram)
+        cv = getattr(self, "_hud_cv", None)
+        if cv is None or not cv.winfo_exists():
+            return
+        c = int(self._hud_cpu[-1]) if self._hud_cpu else 0
+        r = int(self._hud_ram[-1]) if self._hud_ram else 0
+        self._hud_lbl.configure(text=f"CPU{c:3d}%\nMEM{r:3d}%")
+
+        cv.delete("all")
+        w = cv.winfo_width() or 56
+        h = cv.winfo_height() or 24
+
+        def _spark(data, color):
+            if len(data) < 2:
+                return
+            n, ln = data.maxlen, len(data)
+            pts = []
+            for i, v in enumerate(data):
+                pts.append(1 + (w - 2) * (n - ln + i) / (n - 1))      # x: anchored right
+                pts.append(h - 2 - (h - 4) * v / 100.0)               # y: 0-100%
+            cv.create_line(*pts, fill=color, width=1)
+
+        _spark(self._hud_ram, C["accent_dk"])
+        _spark(self._hud_cpu, "white")
+
+    def _pulse_loop(self):
+        """~8fps loop that animates Terminal-tab ping dots (glow/alarm)."""
+        visible = self._is_visible()
+        try:
+            if visible:
+                self._pulse_ping_dots()
+        finally:
+            # fewer event-loop wake-ups while minimized / in the tray
+            self.after(120 if visible else 800, self._pulse_loop)
+
+    def _pulse_ping_dots(self):
+        if not self._conn_ping_enabled or not self._conn_ping_dots:
+            return
+        t = time.monotonic()
+        ok_col   = _blend_hex("#2E8033", "#6FE87E", 0.5 + 0.5 * math.sin(t * 2.0))
+        fail_col = _blend_hex(C["btn_del"], C["card"], 0.3 + 0.3 * math.sin(t * 5.0))
+        for host, cvs in self._conn_ping_dots.items():
+            status = self._conn_ping_cache.get(host)
+            if status == "ok":
+                color = ok_col
+            elif status == "fail":
+                color = fail_col
+            else:
+                continue
+            for cv in cvs:
+                try:
+                    cv.itemconfigure("dot", fill=color)
+                except tk.TclError:
+                    pass   # widget already destroyed
 
     def _update_banner(self):
         """Display the next notification in the banner label."""
