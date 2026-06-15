@@ -17,6 +17,7 @@ import ctypes
 import datetime
 import tempfile
 import threading
+import socket
 import time
 import io
 import re
@@ -430,6 +431,10 @@ def _blend_hex(c1: str, c2: str, t: float) -> str:
     return "#%02X%02X%02X" % tuple(round(x + (y - x) * t) for x, y in zip(a, b))
 
 
+# Port used to probe connection latency via a plain TCP connect.
+_PING_PORTS = {"SSH": 22, "Telnet": 23, "RDP": 3389, "SMB": 445}
+
+
 def _style_flat_scrollbars(root) -> None:
     """Configure thin, flat, arrow-less ttk scrollbar styles in theme colors.
 
@@ -799,6 +804,19 @@ def _make_icon_png(palette: dict | None = None, shape: str = "jelly") -> str:
         return _icon_png_modern(palette, mask_fn)
     except Exception:
         return _icon_png_jelly(palette)
+
+
+def _add_tray_badge(img: Image, color: str) -> Image:
+    """Return a copy of img with a small status dot in the bottom-right corner."""
+    from PIL import ImageDraw
+    img = img.convert("RGBA").copy()
+    w, h = img.size
+    r = int(w * 0.20)
+    cx, cy = w - r, h - r
+    d = ImageDraw.Draw(img)
+    d.ellipse([cx - r - 2, cy - r - 2, cx + r + 2, cy + r + 2], fill="#1a1a2e")  # halo for contrast
+    d.ellipse([cx - r, cy - r, cx + r, cy + r], fill=color)
+    return img
 
 
 _gem_ico_path: str | None = None  # retained for automatic application to all Toplevels
@@ -2579,9 +2597,22 @@ def _get_monitor_work_area(widget: tk.Misc) -> tuple[int, int, int, int]:
                         ("rcMonitor", _RECT), ("rcWork", _RECT),
                         ("dwFlags", wintypes.DWORD)]
 
-        # identify monitor by widget center coordinates
-        cx = widget.winfo_rootx() + widget.winfo_width() // 2
-        cy = widget.winfo_rooty() + widget.winfo_height() // 2
+        # identify monitor by widget center coordinates. While withdrawn/
+        # minimized to tray, winfo_rootx/y no longer reflect the window's
+        # on-screen position, so fall back to the last known normal
+        # geometry (kept up to date by _on_window_resize) to still target
+        # the monitor the window was last shown on.
+        if widget.winfo_viewable():
+            cx = widget.winfo_rootx() + widget.winfo_width() // 2
+            cy = widget.winfo_rooty() + widget.winfo_height() // 2
+        else:
+            m = re.match(r"(\d+)x(\d+)\+(-?\d+)\+(-?\d+)", getattr(widget, "_geometry_cfg", "") or "")
+            if m:
+                w, h, x, y = map(int, m.groups())
+                cx, cy = x + w // 2, y + h // 2
+            else:
+                cx = widget.winfo_rootx() + widget.winfo_width() // 2
+                cy = widget.winfo_rooty() + widget.winfo_height() // 2
         MONITOR_DEFAULTTONEAREST = 2
         monitor = ctypes.windll.user32.MonitorFromPoint(
             wintypes.POINT(cx, cy), MONITOR_DEFAULTTONEAREST
@@ -3441,6 +3472,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         ("notify",    "Notify",    -3),
         ("web",       "Web",       -4),
         ("grep",      "Search",   -12),
+        ("console",   "Console",  -13),
     ]
     _DEFAULT_PINS = ["terminal", "tasks", "notify"]
 
@@ -3470,6 +3502,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._tab_offset: int = 0   # category tab scroll position
         self._work_active: dict | None = None  # {"task_idx": int, "start": datetime}
         self._tray_icon: pystray.Icon | None = None
+        self._tray_notify_pending: bool = False  # unread notification while minimized to tray
         self._work_anim_id = None
         self._work_anim_dots = 0
         self._work_bar_lbl: tk.Label | None = None
@@ -3515,6 +3548,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._grep_history: list[str] = []   # recent queries, newest first
         self._grep_running: bool = False
         self._grep_cancel:  bool = False
+        self._log_tail_file: str | None = None  # Console tab: selected log filename
+        self._log_tail_pos:  int = 0            # Console tab: byte offset already read
 
         self._restore_geometry()
         self._build_ui()
@@ -3577,6 +3612,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 self._active_cfg   = 0
                 self._export_lang  = "en"
                 self._task_hide_done = False
+                self._log_keep_days = 30
+                self._hud_enabled = True
+                C.update(THEMES.get(self._theme, THEMES["plush"]))
                 return
             migrated = True  # migration successful
         else:
@@ -3618,10 +3656,28 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         # task data
         self._tasks = cfg.get("tasks", [])
 
+        # restore an in-progress work timer (matched by event+process)
+        aw = cfg.get("active_work")
+        if aw:
+            for i, t in enumerate(self._tasks):
+                if (t.get("event") == aw.get("event")
+                        and t.get("process") == aw.get("process")):
+                    try:
+                        self._work_active = {
+                            "task_idx": i,
+                            "start": datetime.datetime.fromisoformat(aw["start"]),
+                        }
+                    except (KeyError, ValueError):
+                        pass
+                    break
+
         # notification items
         self._notify_items = cfg.get("notifications", [])
 
         self._conn_ping_enabled = cfg.get("conn_ping_enabled", True)
+
+        # header HUD (CPU/MEM readout) visibility
+        self._hud_enabled = bool(cfg.get("hud_enabled", True))
 
         # tab pin settings
         self._pinned_tabs = cfg.get("pinned_tabs", list(self._DEFAULT_PINS))
@@ -3706,6 +3762,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             "active_tab":      getattr(self, "_active", 0),
             "export_lang":     getattr(self, "_export_lang", "en"),
             "conn_ping_enabled": self._conn_ping_enabled,
+            "hud_enabled":     getattr(self, "_hud_enabled", True),
             "topmost":         self.attributes("-topmost"),
             "alpha":           self.attributes("-alpha"),
             "card_size":       self._card_size,
@@ -3924,6 +3981,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._banner_lbl.pack(side="left", padx=(4, 0))
 
         # Setup vars (must be before _tick())
+        self._hud_enabled_var = tk.BooleanVar(value=self._hud_enabled)
+        self._hud_enabled_var.trace_add("write", self._on_toggle_hud)
+        self._apply_hud_visibility()
         self._banner_enabled = tk.BooleanVar(value=self._banner_enabled_cfg)
         self._banner_enabled.trace_add("write", lambda *_: (self._update_banner(), self._save_config()))
         self._notify_display_sec = tk.IntVar(value=self._notify_display_sec_cfg)
@@ -3990,6 +4050,11 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                               variable=self._banner_enabled,
                               onvalue=True, offvalue=False)
 
+            # CPU/MEM HUD toggle
+            m.add_checkbutton(label="CPU/MEM monitor",
+                              variable=self._hud_enabled_var,
+                              onvalue=True, offvalue=False)
+
             # Notify duration
             def _edit_notify_sec():
                 dlg = InputDialog(self, "Notify Duration",
@@ -4010,7 +4075,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                               activebackground=C["card_h"], activeforeground=C["text"],
                               relief="flat", font=FONT_SMALL)
             for d in (0, 7, 14, 30, 90):
-                prefix = "* " if self._log_keep_days == d else "  "
+                prefix = "* " if getattr(self, "_log_keep_days", 30) == d else "  "
                 label = "Off" if d == 0 else f"Keep {d} days"
                 log_sub.add_command(label=prefix + label,
                                     command=lambda v=d: self._set_log_keep_days(v))
@@ -4371,6 +4436,10 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         elif self._active == -12:
             self._footer_btn.configure(text="Search", command=lambda: None)
             self._footer_btn2.pack_forget()
+        elif self._active == -13:
+            self._footer_btn.configure(text="Open Logs Folder",
+                                        command=self._open_logs_folder)
+            self._footer_btn2.pack_forget()
         else:
             self._footer_btn.configure(text="+ Add Folder", command=self._add_folder)
             self._footer_btn2.configure(text="+ Add File", command=self._add_file)
@@ -4538,6 +4607,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             self._render_rules_list()
         elif self._active == -12:
             self._render_grep_list()
+        elif self._active == -13:
+            self._render_log_console()
         else:
             self._render_folder_list()
 
@@ -4908,12 +4979,15 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         for i, conn in conns_idx:
             self._make_conn_card(i, conn, main_frame)
 
-        # start ping probe for each displayed host (if enabled)
+        # start reachability probe for each displayed host (if enabled)
         if self._conn_ping_enabled:
             for _, conn in conns_idx:
                 host = conn.get("host", "")
-                if host and host not in self._conn_ping_running:
-                    self._conn_ping_probe(host)
+                if not host:
+                    continue
+                port = conn.get("port") or _PING_PORTS.get(conn["protocol"], 0)
+                if host not in self._conn_ping_running:
+                    self._conn_ping_probe(host, port)
 
         # ── drag & drop (enabled only when no sort/search/group filter is active) ──
         if col is not None or query or sg is not None:
@@ -5164,7 +5238,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                              activebackground=C["card"], activeforeground=C["text"])
         edit_btn.pack(side="right", padx=(0, 2))
 
-        # reachability dot (reflects background ping result; hidden when disabled)
+        # reachability dot (reflects background probe; hidden when disabled)
         host = conn.get("host", "")
         if self._conn_ping_enabled:
             status = self._conn_ping_cache.get(host)
@@ -5180,19 +5254,15 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             widget.bind("<Leave>",    lambda e, f=card: _set_bg(f, C["card"]))
             widget.configure(cursor="hand2")
 
-    def _conn_ping_probe(self, host: str):
-        """Run ping in the background and update the dot color."""
+    def _conn_ping_probe(self, host: str, port: int):
+        """Check TCP reachability in the background and update the dot color."""
         self._conn_ping_running.add(host)
 
         def _probe():
             try:
-                result = subprocess.run(
-                    ["ping", "-n", "1", "-w", "2000", host],
-                    capture_output=True, text=True, timeout=3.5,
-                    creationflags=subprocess.CREATE_NO_WINDOW,
-                )
-                ok = "TTL=" in result.stdout or "ttl=" in result.stdout
-            except Exception:
+                with socket.create_connection((host, port), timeout=1.5):
+                    ok = True
+            except OSError:
                 ok = False
             self._conn_ping_cache[host] = "ok" if ok else "fail"
             self.after(0, lambda: self._conn_ping_update_dots(host))
@@ -5200,7 +5270,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         threading.Thread(target=_probe, daemon=True).start()
 
     def _conn_ping_update_dots(self, host: str):
-        """Update the dot canvas color based on the ping result."""
+        """Update the dot canvas color based on the probe result."""
         self._conn_ping_running.discard(host)
         status = self._conn_ping_cache.get(host)
         color = "#4caf50" if status == "ok" else C["btn_del"]
@@ -6163,6 +6233,109 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         export_btn.pack(side="right", padx=(0, 6))
         query_e.bind("<Return>", lambda e: _start_search())
         query_e.focus_set()
+
+    # ── Log console (real-time tail viewer) ────────────────
+
+    def _open_logs_folder(self):
+        LOG_DIR.mkdir(exist_ok=True)
+        os.startfile(LOG_DIR)
+
+    def _render_log_console(self):
+        """Tail the selected terminal session log, highlighting error/warning lines."""
+        f = self._list_frame
+
+        log_files = (sorted(LOG_DIR.glob("*.log"), key=lambda p: p.stat().st_mtime, reverse=True)
+                     if LOG_DIR.exists() else [])
+        names = [p.name for p in log_files]
+
+        if not names:
+            tk.Label(f, text="No logs found.", bg=C["bg"], fg=C["text_sub"],
+                     font=FONT_SMALL, justify="center").pack(pady=20)
+            return
+
+        if self._log_tail_file not in names:
+            self._log_tail_file = names[0]
+            self._log_tail_pos = 0
+
+        top = tk.Frame(f, bg=C["bg"])
+        top.pack(fill="x", padx=6, pady=4)
+        tk.Label(top, text="Log", bg=C["bg"], fg=C["text_sub"],
+                 font=FONT_SMALL, anchor="w").pack(side="left", padx=(0, 4))
+        file_var = tk.StringVar(value=self._log_tail_file)
+        combo = ttk.Combobox(top, textvariable=file_var, values=names,
+                              state="readonly", font=FONT_SMALL)
+        combo.pack(side="left", fill="x", expand=True)
+
+        tk.Frame(f, bg=C["border"], height=1).pack(fill="x")
+
+        txt_frame = tk.Frame(f, bg=C["bg"])
+        txt_frame.pack(fill="both", expand=True)
+        txt = tk.Text(txt_frame, bg=C["card"], fg=C["text"], font=FONT_MONO,
+                       wrap="none", state="disabled", relief="flat", bd=0,
+                       padx=6, pady=4)
+        vsb = ttk.Scrollbar(txt_frame, orient="vertical",
+                            style="Gem.Vertical.TScrollbar", command=txt.yview)
+        txt.configure(yscrollcommand=lambda lo, hi:
+                      _autohide_scrollbar(vsb, lo, hi, dict(side="right", fill="y")))
+        txt.pack(side="left", fill="both", expand=True)
+        txt.tag_configure("err", foreground=C["btn_del"])
+        txt.tag_configure("warn", foreground="#FFB74D")
+
+        ansi_re = re.compile(r"\x1b\[[0-9;]*[a-zA-Z]")
+
+        def _append(chunk: str):
+            txt.configure(state="normal")
+            for line in chunk.splitlines(True):
+                low = line.lower()
+                if "error" in low or "fatal" in low or "traceback" in low:
+                    txt.insert("end", line, "err")
+                elif "warn" in low:
+                    txt.insert("end", line, "warn")
+                else:
+                    txt.insert("end", line)
+            txt.see("end")
+            txt.configure(state="disabled")
+
+        def _reload():
+            txt.configure(state="normal")
+            txt.delete("1.0", "end")
+            txt.configure(state="disabled")
+            path = LOG_DIR / self._log_tail_file
+            try:
+                data = path.read_text(encoding="utf-8", errors="replace")
+                self._log_tail_pos = path.stat().st_size
+            except OSError:
+                self._log_tail_pos = 0
+                return
+            _append(ansi_re.sub("", data))
+
+        def _on_select(_e=None):
+            self._log_tail_file = file_var.get()
+            self._log_tail_pos = 0
+            _reload()
+
+        combo.bind("<<ComboboxSelected>>", _on_select)
+
+        def _poll():
+            if self._active != -13 or not txt.winfo_exists():
+                return   # tab left or widget destroyed: stop polling
+            path = LOG_DIR / self._log_tail_file
+            try:
+                size = path.stat().st_size
+                if size < self._log_tail_pos:
+                    self._log_tail_pos = 0   # file truncated or rotated
+                if size > self._log_tail_pos:
+                    with open(path, "r", encoding="utf-8", errors="replace") as fh:
+                        fh.seek(self._log_tail_pos)
+                        chunk = fh.read()
+                    self._log_tail_pos = size
+                    _append(ansi_re.sub("", chunk))
+            except OSError:
+                pass
+            self.after(1000, _poll)
+
+        _reload()
+        _poll()
 
     # ── Task list ─────────────────────────────────────────
 
@@ -7315,6 +7488,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         }
         self._save_config()
         self._render_list()
+        self._update_tray_badge()
 
     def _stop_work(self, task_idx: int):
         """Stop work: record to log and save."""
@@ -7330,6 +7504,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         })
         self._save_config()  # save with active_work set to None
         self._render_list()
+        self._update_tray_badge()
 
     # ── System tray ───────────────────────────────────────
 
@@ -7512,29 +7687,44 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         wy = self.winfo_rooty() + self.winfo_height() - win.winfo_height() - 10
         win.geometry(f"+{wx}+{wy}")
 
-    def _minimize_to_tray(self):
-        self.withdraw()
-        if self._tray_icon is not None:
-            return  # already running
-
+    def _build_tray_image(self) -> Image:
+        """Render the tray icon, with a status dot if work is active or a
+        notification fired while minimized."""
         png_data = base64.b64decode(_make_icon_png(
             ICON_PALETTES.get(self._theme, ICON_PALETTES["violet"]),
             getattr(self, "_icon_shape", "jelly"),
         ))
         img = Image.open(io.BytesIO(png_data)).convert("RGBA")
+        if self._work_active is not None:
+            img = _add_tray_badge(img, "#4caf50")   # work timer running
+        elif self._tray_notify_pending:
+            img = _add_tray_badge(img, C["btn_del"])  # unread notification
+        return img
+
+    def _update_tray_badge(self):
+        """Refresh the tray icon image to reflect the current status badge."""
+        if self._tray_icon is None:
+            return
+        self._tray_icon.icon = self._build_tray_image()
+
+    def _minimize_to_tray(self):
+        self.withdraw()
+        if self._tray_icon is not None:
+            return  # already running
 
         menu = pystray.Menu(
             pystray.MenuItem("Show Gem", self._restore_from_tray, default=True),
             pystray.Menu.SEPARATOR,
             pystray.MenuItem("Exit", self._quit_from_tray),
         )
-        self._tray_icon = pystray.Icon("Gem", img, "Gem", menu)
+        self._tray_icon = pystray.Icon("Gem", self._build_tray_image(), "Gem", menu)
         threading.Thread(target=self._tray_icon.run, daemon=True).start()
 
     def _restore_from_tray(self, icon=None, item=None):
         self.after(0, self._do_restore)
 
     def _do_restore(self):
+        self._tray_notify_pending = False
         if self._tray_icon is not None:
             self._tray_icon.stop()
             self._tray_icon = None
@@ -8143,6 +8333,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         for task in self._tasks:
             if task.get("archived"):
                 continue
+            if self._task_hide_done and task.get("progress", 0) >= 100:
+                continue
             groups.setdefault(task["event"], []).append(task)
 
         lines: list[str] = []
@@ -8641,12 +8833,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             pass
         _setup_taskbar_icon(self, palette, shape)
         # update the tray icon image if currently minimized to tray
-        if self._tray_icon is not None:
-            try:
-                png_data = base64.b64decode(png_b64)
-                self._tray_icon.icon = Image.open(io.BytesIO(png_data)).convert("RGBA")
-            except Exception:
-                pass
+        self._update_tray_badge()
 
     def _apply_theme(self, theme_name: str):
         if theme_name not in THEMES:
@@ -8667,6 +8854,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._icon = tk.PhotoImage(data=png_b64)
         self.wm_iconphoto(True, self._icon)
         _setup_taskbar_icon(self, palette, getattr(self, "_icon_shape", "jelly"))
+        self._update_tray_badge()
 
         # destroy all widgets and rebuild, with a soft alpha cross-fade
         def _do_rebuild():
@@ -8721,9 +8909,23 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         except tk.TclError:
             return False
 
+    def _apply_hud_visibility(self):
+        """Show/hide the header CPU/MEM HUD per self._hud_enabled."""
+        if self._hud_enabled:
+            self._hud_cv.pack(side="left", padx=(8, 0), before=self._banner_lbl)
+            self._hud_lbl.pack(side="left", padx=(3, 0), before=self._banner_lbl)
+        else:
+            self._hud_cv.pack_forget()
+            self._hud_lbl.pack_forget()
+
+    def _on_toggle_hud(self, *_):
+        self._hud_enabled = self._hud_enabled_var.get()
+        self._apply_hud_visibility()
+        self._save_config()
+
     def _update_hud(self):
         """Sample CPU/RAM and redraw the header sparkline + readout."""
-        if not self._is_visible():
+        if not self._hud_enabled or not self._is_visible():
             return   # nobody is looking; GetSystemTimes is cumulative, so
                      # the first sample after restore averages the gap
         cpu, ram = _sample_cpu(), _sample_ram()
@@ -8731,18 +8933,31 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             self._hud_cpu.append(cpu)
         if ram is not None:
             self._hud_ram.append(ram)
+        self._draw_hud()
+
+    def _draw_hud(self, pulse: float = 0.35):
+        """Redraw the header sparkline + readout with a neon glow halo.
+
+        pulse (0-1) sets the glow bloom intensity; _pulse_hud() animates
+        it while CPU/RAM usage is high for an alarm-like effect.
+        """
         cv = getattr(self, "_hud_cv", None)
         if cv is None or not cv.winfo_exists():
             return
         c = int(self._hud_cpu[-1]) if self._hud_cpu else 0
         r = int(self._hud_ram[-1]) if self._hud_ram else 0
-        self._hud_lbl.configure(text=f"CPU{c:3d}%\nMEM{r:3d}%")
+        hot = c >= 80 or r >= 80
+        self._hud_lbl.configure(
+            text=f"CPU{c:3d}%\nMEM{r:3d}%",
+            fg=_blend_hex(C["accent_lt"], C["btn_del_h"], pulse) if hot else C["accent_lt"],
+        )
 
         cv.delete("all")
         w = cv.winfo_width() or 56
         h = cv.winfo_height() or 24
+        bg = C["accent"]
 
-        def _spark(data, color):
+        def _spark(data, color, glow_t):
             if len(data) < 2:
                 return
             n, ln = data.maxlen, len(data)
@@ -8750,20 +8965,34 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             for i, v in enumerate(data):
                 pts.append(1 + (w - 2) * (n - ln + i) / (n - 1))      # x: anchored right
                 pts.append(h - 2 - (h - 4) * v / 100.0)               # y: 0-100%
-            cv.create_line(*pts, fill=color, width=1)
+            cv.create_line(*pts, fill=_blend_hex(bg, color, glow_t), width=3, smooth=True)
+            cv.create_line(*pts, fill=color, width=1, smooth=True)
 
-        _spark(self._hud_ram, C["accent_dk"])
-        _spark(self._hud_cpu, "white")
+        _spark(self._hud_ram, C["accent_dk"], pulse if r >= 80 else 0.35)
+        _spark(self._hud_cpu, "#FFFFFF",      pulse if c >= 80 else 0.35)
 
     def _pulse_loop(self):
-        """~8fps loop that animates Terminal-tab ping dots (glow/alarm)."""
+        """~8fps loop that animates Terminal-tab ping dots and the HUD glow (alarm)."""
         visible = self._is_visible()
         try:
             if visible:
                 self._pulse_ping_dots()
+                self._pulse_hud()
         finally:
             # fewer event-loop wake-ups while minimized / in the tray
             self.after(120 if visible else 800, self._pulse_loop)
+
+    def _pulse_hud(self):
+        """Pulse the HUD glow while CPU or RAM usage is high (>= 80%)."""
+        if not self._hud_enabled:
+            return
+        c = int(self._hud_cpu[-1]) if self._hud_cpu else 0
+        r = int(self._hud_ram[-1]) if self._hud_ram else 0
+        if c < 80 and r < 80:
+            return
+        t = time.monotonic()
+        pulse = 0.35 + 0.55 * (0.5 + 0.5 * math.sin(t * 4.0))
+        self._draw_hud(pulse)
 
     def _pulse_ping_dots(self):
         if not self._conn_ping_enabled or not self._conn_ping_dots:
@@ -8871,6 +9100,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             if notify_at <= now < sched and key not in self._notified:
                 self._notified.add(key)
                 NotificationPopup(self, item, self._notify_display_sec.get() * 1000)
+                if not self._is_visible():
+                    self._tray_notify_pending = True
+                    self._update_tray_badge()
                 open_paths = item.get("open_paths", [])
                 if not open_paths and item.get("open_path"):
                     open_paths = [item["open_path"]]
