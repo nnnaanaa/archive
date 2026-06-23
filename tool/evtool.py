@@ -1,4 +1,8 @@
-"""evtool: Tera Term マクロ試験のエビデンス取得・まとめツール（単一ファイル / Windows専用）.
+"""evtool: ウィンドウのエビデンス取得・まとめツール（単一ファイル / Windows専用）.
+
+Tera Term マクロ試験を主用途として作られているが、対象ウィンドウは hwnd で
+固定して追跡するため、任意のアプリケーションのスクリーンショット・ログ取得にも
+使える。
 
 使い方:
     py evtool.py
@@ -13,11 +17,13 @@ import ctypes
 import html
 import io
 import json
+import math
 import os
 import queue
 import re
 import shutil
 import sys
+import tempfile
 import threading
 import tkinter as tk
 from dataclasses import asdict, dataclass, field
@@ -26,10 +32,11 @@ from pathlib import Path
 from tkinter import filedialog, messagebox, ttk
 from typing import Callable, Optional
 
+import win32api
 import win32con
 import win32gui
 import win32ui
-from PIL import Image, ImageDraw, ImageGrab
+from PIL import Image, ImageDraw, ImageGrab, ImageTk
 
 __version__ = "0.1.0"
 
@@ -44,12 +51,34 @@ PW_RENDERFULLCONTENT = 0x00000002
 # 「画面全体」を対象として選んだことを表す特別な値（実際のhwndは正の整数なので衝突しない）。
 FULL_SCREEN_HWND = -1
 
+# 個別モニターを対象として選んだことを表す値の基準点。モニター0 = -2, モニター1 = -3,
+# ... というように負方向に連番を振る（実際のhwndは正の整数なので衝突しない）。
+MONITOR_HWND_BASE = -2
+
+
+def list_monitors() -> list[tuple[int, int, int, int]]:
+    """接続されている各モニターの矩形 (left, top, right, bottom) を仮想スクリーン座標で列挙する."""
+    return [info[2] for info in win32api.EnumDisplayMonitors()]
+
+
+def is_monitor_hwnd(hwnd: int) -> bool:
+    return hwnd <= MONITOR_HWND_BASE
+
+
+def monitor_hwnd(index: int) -> int:
+    return MONITOR_HWND_BASE - index
+
+
+def monitor_index_from_hwnd(hwnd: int) -> int:
+    return MONITOR_HWND_BASE - hwnd
+
 
 def list_capture_candidate_windows() -> list[tuple[int, str]]:
     """キャプチャ対象として選択可能なトップレベルウィンドウを (hwnd, タイトル) で列挙する.
 
-    タイトル文字列ではなく hwnd で対象を固定して以降キャプチャするため、Tera Term の
-    ウィンドウタイトルが接続先表示等で変化しても選択したウィンドウを継続して取得できる。
+    タイトル文字列ではなく hwnd で対象を固定して以降キャプチャするため、対象アプリの
+    ウィンドウタイトルが実行中に変化しても選択したウィンドウを継続して取得できる
+    （例: Tera Term は接続先表示でタイトルが変わる）。
     """
     results: list[tuple[int, str]] = []
 
@@ -118,6 +147,13 @@ def capture_full_screen(save_path: Path) -> None:
     image.save(save_path)
 
 
+def capture_monitor(rect: tuple[int, int, int, int], save_path: Path) -> None:
+    """指定したモニター1台分の範囲だけをキャプチャしてPNGとして保存する."""
+    image = ImageGrab.grab(bbox=rect, all_screens=True)
+    save_path.parent.mkdir(parents=True, exist_ok=True)
+    image.save(save_path)
+
+
 # ============================================================================
 # エビデンス取得セッション（フォルダ構成・スクリーンショット・ログ・メタ情報）
 # ============================================================================
@@ -153,9 +189,9 @@ class SessionMeta:
 class EvidenceSession:
     """1件の試験項目に対するエビデンス取得を担当するセッション.
 
-    キャプチャ対象は開始時に選択した hwnd に固定する。Tera Term のウィンドウ
-    タイトルは接続先表示等で実行中に変化することがあるため、タイトル文字列の
-    再検索ではなく hwnd 固定で追跡する。
+    キャプチャ対象は開始時に選択した hwnd に固定する。対象アプリのウィンドウ
+    タイトルは実行中に変化することがあるため（例: Tera Term の接続先表示）、
+    タイトル文字列の再検索ではなく hwnd 固定で追跡する。
     """
 
     def __init__(
@@ -184,6 +220,7 @@ class EvidenceSession:
         self._stop_event = threading.Event()
         self._thread: Optional[threading.Thread] = None
         self._shot_seq = 0
+        self.failed_count = 0
 
     # ---- ライフサイクル ----------------------------------------------
     def start(self) -> None:
@@ -223,17 +260,31 @@ class EvidenceSession:
         if log_file:
             self._collect_log(Path(log_file))
 
-        meta_path = self.dir / "meta.json"
-        meta_path.write_text(
-            json.dumps(asdict(self.meta), ensure_ascii=False, indent=2),
-            encoding="utf-8",
-        )
+        self._save_meta_snapshot()
         return self.dir
+
+    def _save_meta_snapshot(self) -> None:
+        """現時点の meta.json を保存する.
+
+        capture_now の成功ごとに呼ぶことで、長時間の試験中にアプリが異常終了
+        しても、それまでに撮れていたスクリーンショットとその対応関係（タグ・
+        備考等）を失わないようにする（finish() 時にも確定版として上書きされる）。
+        """
+        meta_path = self.dir / "meta.json"
+        try:
+            meta_path.write_text(
+                json.dumps(asdict(self.meta), ensure_ascii=False, indent=2),
+                encoding="utf-8",
+            )
+        except OSError as exc:
+            self._log_callback(f"警告: meta.json の保存に失敗しました: {exc}")
 
     # ---- キャプチャ ----------------------------------------------------
     def capture_now(self, tag: str = "manual", note: str = "") -> Optional[str]:
         is_full_screen = self.hwnd == FULL_SCREEN_HWND
-        if not is_full_screen and not win32gui.IsWindow(self.hwnd):
+        is_monitor = is_monitor_hwnd(self.hwnd)
+        if not is_full_screen and not is_monitor and not win32gui.IsWindow(self.hwnd):
+            self.failed_count += 1
             self._log_callback("警告: 対象ウィンドウが見つかりません（閉じられた可能性があります）")
             return None
 
@@ -244,12 +295,20 @@ class EvidenceSession:
             try:
                 if is_full_screen:
                     capture_full_screen(path)
+                elif is_monitor:
+                    monitors = list_monitors()
+                    index = monitor_index_from_hwnd(self.hwnd)
+                    if index >= len(monitors):
+                        raise RuntimeError("モニター構成が変化したため取得できません")
+                    capture_monitor(monitors[index], path)
                 else:
                     capture_window(self.hwnd, path)
             except Exception as exc:  # noqa: BLE001 - 取得は続けたいので例外は握り潰して警告のみ
+                self.failed_count += 1
                 self._log_callback(f"警告: キャプチャに失敗しました: {exc}")
                 return None
 
+            self.failed_count = 0
             self.meta.shots.append(
                 asdict(
                     ShotRecord(
@@ -260,13 +319,26 @@ class EvidenceSession:
                     )
                 )
             )
+            self._save_meta_snapshot()
             suffix = f" - {note}" if note else ""
             self._log_callback(f"キャプチャしました: {filename} ({tag}){suffix}")
             return filename
 
     def _auto_capture_loop(self) -> None:
+        consecutive_failures = 0
+        max_consecutive_failures = 3
         while not self._stop_event.wait(self.interval):
-            self.capture_now(tag="auto")
+            filename = self.capture_now(tag="auto")
+            if filename is None:
+                consecutive_failures += 1
+                if consecutive_failures >= max_consecutive_failures:
+                    self._log_callback(
+                        f"警告: 対象が{max_consecutive_failures}回連続で取得できないため、"
+                        "自動キャプチャを停止しました。"
+                    )
+                    break
+            else:
+                consecutive_failures = 0
 
     # ---- ログ -----------------------------------------------------------
     def _collect_log(self, log_path: Path) -> None:
@@ -429,6 +501,26 @@ def generate_report(session_dir: Path) -> Path:
 
 ENCODINGS = ["utf-8", "utf-8-sig", "shift_jis", "cp932", "euc_jp"]
 
+
+def detect_encoding(path: "str | Path") -> str:
+    """ファイルの先頭バイトとデコード試行から、最も妥当そうなエンコーディングを推測する.
+
+    BOM付きUTF-8は専用に検出する。それ以外は utf-8 → cp932 → shift_jis → euc_jp の順に
+    デコードを試し、最初に成功したものを採用する（全て失敗した場合は utf-8 を返す。
+    cp932 は shift_jis の上位互換にあたるため、日本語Windows環境での誤判定を避けるべく
+    shift_jis より先に試す）。
+    """
+    data = Path(path).read_bytes()
+    if data.startswith(b"\xef\xbb\xbf"):
+        return "utf-8-sig"
+    for encoding in ("utf-8", "cp932", "shift_jis", "euc_jp"):
+        try:
+            data.decode(encoding)
+            return encoding
+        except UnicodeDecodeError:
+            continue
+    return "utf-8"
+
 # 代表的な言語向けの動作確認用出力コードのプリセット。
 # {name} は対象変数名に置換される（単純な文字列置換のため、対象言語側の
 # 文字列展開記法と衝突しないよう、テンプレートは連結（+, &, <<）スタイルで統一している）。
@@ -453,12 +545,24 @@ def build_variable_pattern(var_name: str, expected_value: str = "", as_regex: bo
     """変数定義（代入）行を検出する正規表現を生成する.
 
     expected_value を指定すると、その値が代入されている行のみにマッチする。
+
+    変数名は \\b（単語境界）ではなく前後の非単語文字判定で囲むため、$var や obj.prop
+    のように英数字・アンダースコア以外の特殊文字を含む/それで始まる変数名でも正しく
+    検出できる（\\b は境界の片側に単語文字が必要なため、$ のような非単語文字の前に
+    単語文字が無いと機能しない）。変数名の直後には GROUP_LIST[0] や arr[i] のような
+    配列添字を任意で許容する。期待値側は ' " のクォートで囲まれていても無くても
+    マッチするよう、入力側のクォートは比較前に取り除き、ソースコード側のクォートは
+    あっても無くても良いものとして扱う。
     """
     var_re = re.escape(var_name)
+    name_part = rf"(?<!\w){var_re}(?!\w)(?:\[[^\]\n]*\])?"
     if expected_value:
-        value_part = expected_value if as_regex else re.escape(expected_value)
-        return rf"\b{var_re}\b\s*[+\-*/%&|^]?=\s*{value_part}"
-    return rf"\b{var_re}\b\s*[+\-*/%&|^]?=(?!=)"
+        value = expected_value
+        if not as_regex and len(value) >= 2 and value[0] == value[-1] and value[0] in "'\"":
+            value = value[1:-1]
+        value_part = value if as_regex else re.escape(value)
+        return rf"{name_part}\s*[+\-*/%&|^]?=\s*['\"]?{value_part}['\"]?"
+    return rf"{name_part}\s*[+\-*/%&|^]?=(?!=)"
 
 
 def build_branch_pattern(condition: str, as_regex: bool = False) -> str:
@@ -475,13 +579,38 @@ def find_pattern_lines(lines: list[str], pattern: str) -> list[tuple[int, str]]:
 
 @dataclass
 class CheckItem:
-    """机上確認の確認項目1件分."""
+    """机上確認の確認項目1件分.
+
+    label・pattern は content/expected から動的に算出する。取込み後に Treeview 上で
+    内容や期待値を編集すれば、表示ラベルも検索に使う正規表現も自動的に追従する。
+    custom_label が設定されている場合（CSVの「名称」列で明示指定された場合）はそちらを
+    表示優先する。
+    """
 
     kind: str  # "variable" / "branch" / "custom"
-    label: str
-    pattern: str
+    content: str  # variable: 変数名 / branch: 条件式 / custom: 正規表現
+    expected: str = ""  # variable のときの期待値（branch/custom では未使用）
+    custom_label: str = ""
     result: str = "-"  # "-" / "OK" / "NG"
     matched_line: str = ""
+
+    @property
+    def label(self) -> str:
+        if self.custom_label:
+            return self.custom_label
+        if self.kind == "branch":
+            return f"if: {self.content}"
+        if self.kind == "custom":
+            return self.content
+        return f"変数: {self.content}" + (f" = {self.expected}" if self.expected else "")
+
+    @property
+    def pattern(self) -> str:
+        if self.kind == "branch":
+            return build_branch_pattern(self.content)
+        if self.kind == "custom":
+            return self.content
+        return build_variable_pattern(self.content, self.expected)
 
 
 @dataclass
@@ -509,6 +638,25 @@ def split_names(text: str) -> list[str]:
     names: list[str] = []
     for chunk in re.split(r"[,\n]", text):
         name = chunk.strip()
+        if name:
+            names.append(name)
+    return names
+
+
+def extract_variable_names_from_text(lines: list[str]) -> list[str]:
+    """机上確認の「まとめ追加」と同じ書式（変数名 / 変数名 = 期待値）の行から変数名だけを抜き出す.
+
+    変数名だけのリストでも、期待値付きの行が混在していても変数名部分のみを取り出せるように
+    する。if/re: の行（変数定義ではないため）やコメント(#)・空行は対象外とする。
+    """
+    names: list[str] = []
+    for line in lines:
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        if re.match(r"(?i)^(if\s+|re:)", stripped):
+            continue
+        name = stripped.split("=", 1)[0].strip()
         if name:
             names.append(name)
     return names
@@ -542,7 +690,13 @@ BULK_CHECK_FORMAT_HELP = (
     "  変数名             → 変数定義の存在を確認\n"
     "  変数名 = 期待値     → 変数定義＋期待値を確認\n"
     "  if 条件式          → 分岐(if)の存在を確認\n"
-    "  re: 正規表現        → カスタム正規表現で確認"
+    "  re: 正規表現        → カスタム正規表現で確認\n"
+    "\n"
+    "CSVから読み込み:\n"
+    "  .txt → 上記と同じ1行1項目形式のテキストファイルとして読み込みます。\n"
+    "  .csv → 列名（1行目）に 種別/内容(または変数名・条件式・正規表現)/期待値/名称 を含める\n"
+    "    と自動で認識します。列名が無い場合は1列目を内容、2列目を期待値として扱います\n"
+    "    （種別は省略時「変数定義」）。"
 )
 
 
@@ -554,19 +708,16 @@ def parse_bulk_check_line(line: str) -> Optional["CheckItem"]:
 
     if re.match(r"(?i)^if\s+", stripped):
         condition = re.sub(r"(?i)^if\s+", "", stripped).strip()
-        pattern = build_branch_pattern(condition)
-        return CheckItem(kind="branch", label=f"if: {condition}", pattern=pattern)
+        return CheckItem(kind="branch", content=condition)
 
     if re.match(r"(?i)^re:", stripped):
         pattern = re.sub(r"(?i)^re:", "", stripped).strip()
-        return CheckItem(kind="custom", label=pattern, pattern=pattern)
+        return CheckItem(kind="custom", content=pattern)
 
     name, sep, expected = stripped.partition("=")
     name = name.strip()
     expected = expected.strip() if sep else ""
-    pattern = build_variable_pattern(name, expected)
-    label = f"変数: {name}" + (f" = {expected}" if expected else "")
-    return CheckItem(kind="variable", label=label, pattern=pattern)
+    return CheckItem(kind="variable", content=name, expected=expected)
 
 
 def find_assignment_occurrences(lines: list[str], var_names: list[str]) -> list[Occurrence]:
@@ -658,45 +809,132 @@ PALETTE = {
 FONT_FAMILY = "Yu Gothic UI"
 FONT_SIZE = 8
 
+# 入力欄(Entry/Combobox)の幅をタブ間で揃えるための共通定数。
+ENTRY_WIDTH_TEXT = 32  # 試験ID・試験項目名・変数名・フォルダ名など、文字列を入れる欄
+ENTRY_WIDTH_SHORT = 8  # 間隔(秒)など、数値だけを入れる欄
+COMBO_WIDTH_ENCODING = 10  # エンコーディング選択
 
-def _build_app_icon() -> list[tk.PhotoImage]:
+
+def _build_app_icon() -> tuple[list[tk.PhotoImage], Optional[Path]]:
     """タスクバー等に表示するアプリアイコンを実行時に生成する（外部アセット不要）.
 
+    戻り値は (タイトルバー用 PhotoImage のリスト, タスクバー用 .ico ファイルのパス)。
     256x256 で描いてから複数サイズに縮小することで、タスクバー/タイトルバーの
-    小さいサイズでもアンチエイリアスが効いて綺麗に見えるようにする。
+    小さいサイズでもアンチエイリアスが効いて綺麗に見えるようにする。GUI全体の
+    パステルカラーのテーマに合わせ、ラベンダー→スカイブルーのグラデーション地に
+    しずく（雫）と星ひとつだけを置いた、装飾を抑えたゆめかわ系のモチーフにする。
     """
     size = 256
-    margin = 10
-    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
-    draw = ImageDraw.Draw(img)
-    draw.rounded_rectangle(
-        (margin, margin, size - margin, size - margin), radius=60, fill=(94, 110, 219, 255)
-    )
+    margin = 14
 
+    # 背景グラデーション（ラベンダー -> スカイブルー、縦方向）
+    top_color = (178, 173, 240)
+    bottom_color = (165, 211, 235)
+    gradient = Image.new("RGBA", (size, size))
+    pixels = gradient.load()
+    for y in range(size):
+        t = y / size
+        r = round(top_color[0] + (bottom_color[0] - top_color[0]) * t)
+        g = round(top_color[1] + (bottom_color[1] - top_color[1]) * t)
+        b = round(top_color[2] + (bottom_color[2] - top_color[2]) * t)
+        for x in range(size):
+            pixels[x, y] = (r, g, b, 255)
+
+    mask = Image.new("L", (size, size), 0)
+    mask_draw = ImageDraw.Draw(mask)
+    mask_draw.rounded_rectangle((margin, margin, size - margin, size - margin), radius=70, fill=255)
+
+    img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
+    img.paste(gradient, (0, 0), mask)
+    draw = ImageDraw.Draw(img)
+
+    # 上半分に柔らかいハイライトを重ねて立体感を出す
     highlight = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     hdraw = ImageDraw.Draw(highlight)
     hdraw.rounded_rectangle(
-        (margin, margin, size - margin, int(size * 0.55)), radius=60, fill=(255, 255, 255, 35)
+        (margin, margin, size - margin, int(size * 0.5)), radius=70, fill=(255, 255, 255, 55)
     )
     img = Image.alpha_composite(img, highlight)
     draw = ImageDraw.Draw(img)
 
-    check_width = 26
-    points = [(72, 138), (110, 178), (190, 80)]
-    draw.line(points, fill=(255, 255, 255, 255), width=check_width, joint="curve")
-    cap_radius = check_width // 2
-    for x, y in (points[0], points[-1]):
-        draw.ellipse(
-            (x - cap_radius, y - cap_radius, x + cap_radius, y + cap_radius), fill=(255, 255, 255, 255)
-        )
+    # しずく（雫）: 下側は円、上側は頂点へ向けてなめらかに収束する輪郭を多角形で近似
+    cx, cy, r = 128, 158, 46
+    apex_y = cy - r * 2.05
+    drop_points = [(cx, apex_y)]
+    n = 40
+    for i in range(n + 1):
+        t = i / n
+        angle = math.radians(40 + t * (360 - 80))
+        drop_points.append((cx + r * math.sin(angle), cy - r * math.cos(angle)))
+    draw.polygon(drop_points, fill=(255, 255, 255, 255))
 
+    # しずくの中の光の反射（左上寄りの小さい楕円ハイライト）
+    draw.ellipse((cx - 20, cy - 14, cx - 2, cy + 4), fill=(150, 160, 230, 150))
+
+    # 右上に星ひとつだけ（ゆめかわ感は出すが装飾は最小限にする）
+    star_points = []
+    star_cx, star_cy, outer_pt, inner_pt = 184, 84, 14, 5
+    for i in range(8):
+        angle = math.pi / 4 * i - math.pi / 2
+        rr = outer_pt if i % 2 == 0 else inner_pt
+        star_points.append((star_cx + rr * math.cos(angle), star_cy + rr * math.sin(angle)))
+    draw.polygon(star_points, fill=(255, 255, 255, 225))
+
+    sizes = (64, 32, 16)
     icons = []
-    for target_size in (64, 32, 16):
+    for target_size in sizes:
         resized = img.resize((target_size, target_size), Image.LANCZOS)
         buf = io.BytesIO()
         resized.save(buf, format="PNG")
         icons.append(tk.PhotoImage(data=buf.getvalue()))
-    return icons
+
+    # Windows のタスクバーボタンは iconphoto だけでは反映されず、python.exe の既定
+    # アイコンが優先されることがあるため、.ico も明示的に書き出して iconbitmap で
+    # 設定する（_set_app_icon 参照）。
+    ico_path: Optional[Path] = None
+    try:
+        ico_path = Path(tempfile.gettempdir()) / "evtool_app_icon.ico"
+        img.save(ico_path, format="ICO", sizes=[(s, s) for s in sizes])
+    except OSError:
+        ico_path = None
+
+    return icons, ico_path
+
+
+def _set_app_icon(root: tk.Tk) -> list[tk.PhotoImage]:
+    """ウィンドウ・タスクバーの双方にアプリアイコンを反映させる.
+
+    iconphoto/iconbitmap だけでは Windows のタスクバーボタンに反映されず、
+    python.exe の既定アイコン（py コマンド経由起動時など）のままになることが
+    あるため、Win32 API で対象ウィンドウへ直接 WM_SETICON を送って上書きする。
+    戻り値の PhotoImage リストは GC で消えないよう呼び出し側で参照を保持すること。
+    """
+    icon_images, ico_path = _build_app_icon()
+    root.iconphoto(True, *icon_images)
+    if ico_path is not None:
+        try:
+            root.iconbitmap(default=str(ico_path))
+        except tk.TclError:
+            pass
+        try:
+            hwnd = root.winfo_id()
+            hicon_big = win32gui.LoadImage(
+                0, str(ico_path), win32con.IMAGE_ICON, 32, 32, win32con.LR_LOADFROMFILE
+            )
+            hicon_small = win32gui.LoadImage(
+                0, str(ico_path), win32con.IMAGE_ICON, 16, 16, win32con.LR_LOADFROMFILE
+            )
+            win32gui.SendMessage(hwnd, win32con.WM_SETICON, win32con.ICON_BIG, hicon_big)
+            win32gui.SendMessage(hwnd, win32con.WM_SETICON, win32con.ICON_SMALL, hicon_small)
+            # WM_SETICON だけではタスクバーボタンに反映されないことがあるため、
+            # ウィンドウクラス自体のアイコンも書き換える（py 経由起動時の対策）。
+            ctypes.windll.user32.SetClassLongPtrW.restype = ctypes.c_void_p
+            ctypes.windll.user32.SetClassLongPtrW.argtypes = [ctypes.c_void_p, ctypes.c_int, ctypes.c_void_p]
+            ctypes.windll.user32.SetClassLongPtrW(hwnd, win32con.GCL_HICON, hicon_big)
+            ctypes.windll.user32.SetClassLongPtrW(hwnd, win32con.GCL_HICONSM, hicon_small)
+        except Exception:  # noqa: BLE001 - アイコン設定に失敗しても起動自体は継続したい
+            pass
+    return icon_images
 
 
 def _apply_theme(root: tk.Tk) -> None:
@@ -713,6 +951,7 @@ def _apply_theme(root: tk.Tk) -> None:
     style.configure("TLabel", background=PALETTE["bg"], foreground=PALETTE["text"])
     style.configure("Header.TLabel", font=(FONT_FAMILY, 10, "bold"), foreground=PALETTE["accent_dark"])
     style.configure("Status.TLabel", foreground=PALETTE["muted"])
+    style.configure("Warning.TLabel", foreground=PALETTE["pink_dark"], font=(FONT_FAMILY, FONT_SIZE, "bold"))
 
     style.configure(
         "TEntry",
@@ -747,7 +986,7 @@ def _apply_theme(root: tk.Tk) -> None:
         "Primary.TButton",
         background=PALETTE["accent_dark"],
         foreground="#FFFFFF",
-        padding=(8, 3),
+        padding=(6, 2),
         font=(FONT_FAMILY, FONT_SIZE, "bold"),
     )
     style.map("Primary.TButton", background=[("active", "#6577CC"), ("disabled", "#C7CCE8")])
@@ -759,6 +998,10 @@ def _apply_theme(root: tk.Tk) -> None:
     style.map("Finish.TButton", background=[("active", "#EC9CAC"), ("disabled", "#E5E7F0")])
 
     style.configure("TScrollbar", background=PALETTE["accent"], troughcolor=PALETTE["bg"])
+
+    style.configure(
+        "ShotRow.TFrame", background=PALETTE["panel"], relief="flat", borderwidth=1
+    )
 
     style.configure(
         "TNotebook",
@@ -797,49 +1040,102 @@ def _apply_theme(root: tk.Tk) -> None:
     style.map("Treeview", background=[("selected", PALETTE["accent"])], foreground=[("selected", PALETTE["text"])])
 
 
-class Tooltip:
-    """ウィジェットにマウスを乗せたときに簡単な説明を表示するツールチップ."""
+class CollapsibleHelp(ttk.Frame):
+    """「使い方」ボタンで開閉できる補足説明.
 
-    def __init__(self, widget: tk.Widget, text: str):
-        self.widget = widget
-        self.text = text
-        self._tip: Optional[tk.Toplevel] = None
-        widget.bind("<Enter>", self._show)
-        widget.bind("<Leave>", self._hide)
+    既定では閉じておき、説明文が画面の必要高さを圧迫しないようにする
+    （特にウィンドウを小さくしたときにボタン等が隠れる問題への対策）。
+    """
 
-    def _show(self, _event: object = None) -> None:
-        if self._tip is not None:
-            return
-        x = self.widget.winfo_rootx() + 12
-        y = self.widget.winfo_rooty() + self.widget.winfo_height() + 6
-        self._tip = tk.Toplevel(self.widget)
-        self._tip.wm_overrideredirect(True)
-        self._tip.wm_geometry(f"+{x}+{y}")
-        label = tk.Label(
-            self._tip,
-            text=self.text,
+    def __init__(self, parent: tk.Misc, text: str, *, wraplength: int = 600):
+        super().__init__(parent)
+        self._open = False
+
+        self._toggle_btn = ttk.Button(self, command=self._toggle)
+        self._toggle_btn.pack(anchor="w")
+        self._label = ttk.Label(
+            self,
+            text=text,
+            style="Status.TLabel",
             justify="left",
-            background="#FFF8DC",
-            foreground=PALETTE["text"],
-            relief="solid",
-            borderwidth=1,
-            font=(FONT_FAMILY, FONT_SIZE),
-            padx=6,
-            pady=3,
+            wraplength=wraplength,
         )
-        label.pack()
+        self._sync()
 
-    def _hide(self, _event: object = None) -> None:
-        if self._tip is not None:
-            self._tip.destroy()
-            self._tip = None
+    def _sync(self) -> None:
+        self._toggle_btn.configure(text="▲" if self._open else "▼", width=2)
+        if self._open:
+            self._label.pack(anchor="w", pady=(4, 0))
+        else:
+            self._label.pack_forget()
+
+    def _toggle(self) -> None:
+        self._open = not self._open
+        self._sync()
+
+
+class CapturePreviewPopup(tk.Toplevel):
+    """キャプチャ直後に、実際に撮れた画像をその場で確認できるポップアップ.
+
+    レポート（HTML化）を生成するまでキャプチャ内容を確認する手段がなかった課題に
+    対応するため、キャプチャ直後・対象ウィンドウ選択直後に一時的に表示する。
+    クリックまたは一定時間で自動的に閉じる。
+    """
+
+    def __init__(self, parent: tk.Misc, image_path: Path, caption: str = "", auto_close_ms: int = 3000):
+        super().__init__(parent)
+        self.overrideredirect(True)
+        self.attributes("-topmost", True)
+
+        self._photo: Optional[ImageTk.PhotoImage] = None
+        outer = tk.Frame(self, bg=PALETTE["accent_dark"], padx=2, pady=2)
+        outer.pack()
+        inner = tk.Frame(outer, bg=PALETTE["panel"])
+        inner.pack()
+
+        try:
+            with Image.open(image_path) as img:
+                max_width = 360
+                ratio = min(1.0, max_width / img.width)
+                size = (max(1, round(img.width * ratio)), max(1, round(img.height * ratio)))
+                thumb = img.convert("RGB").resize(size, Image.LANCZOS)
+            self._photo = ImageTk.PhotoImage(thumb)
+            tk.Label(inner, image=self._photo, bg=PALETTE["panel"]).pack()
+        except Exception as exc:  # noqa: BLE001 - プレビューに失敗しても処理は継続したい
+            tk.Label(
+                inner, text=f"(プレビューを表示できません: {exc})", bg=PALETTE["panel"], fg=PALETTE["muted"]
+            ).pack(padx=20, pady=20)
+
+        if caption:
+            tk.Label(
+                inner, text=caption, bg=PALETTE["panel"], fg=PALETTE["muted"], font=(FONT_FAMILY, FONT_SIZE)
+            ).pack(anchor="w", padx=4, pady=(0, 2))
+
+        self.update_idletasks()
+        self._place_near(parent)
+
+        self.bind("<Button-1>", lambda _e: self._safe_destroy())
+        self.after(auto_close_ms, self._safe_destroy)
+
+    def _place_near(self, parent: tk.Misc) -> None:
+        width = self.winfo_reqwidth()
+        height = self.winfo_reqheight()
+        x = parent.winfo_rootx() + parent.winfo_width() - width - 16
+        y = parent.winfo_rooty() + parent.winfo_height() - height - 16
+        x = max(0, x)
+        y = max(0, y)
+        self.geometry(f"+{x}+{y}")
+
+    def _safe_destroy(self) -> None:
+        if self.winfo_exists():
+            self.destroy()
 
 
 class WindowPickerDialog(tk.Toplevel):
     """現在開いているウィンドウから、キャプチャ対象を選択させるダイアログ.
 
     選択結果は hwnd で確定するため、以降タイトルが変化しても対象を継続して
-    追跡できる（Tera Term の接続先表示などでタイトルが変わるケースに対応）。
+    追跡できる（例: Tera Term は接続先表示でタイトルが変わる）。
     """
 
     def __init__(self, parent: tk.Misc):
@@ -858,9 +1154,10 @@ class WindowPickerDialog(tk.Toplevel):
         ttk.Label(
             frm,
             text=(
-                "キャプチャ対象を選んでください（一覧先頭の「画面全体」を選ぶと\n"
-                "デスクトップ全体をキャプチャします）。ウィンドウを選んだ場合は、\n"
-                "以後タイトルが変化しても同じウィンドウを継続して追跡します。"
+                "キャプチャ対象を選んでください（「画面全体」は全モニターをまとめて、\n"
+                "「モニターN」は1台分だけをキャプチャします。複数モニター使用時に表示\n"
+                "されます）。ウィンドウを選んだ場合は、以後タイトルが変化しても同じ\n"
+                "ウィンドウを継続して追跡します。"
             ),
             justify="left",
         ).pack(fill="x", pady=(0, 8))
@@ -898,7 +1195,18 @@ class WindowPickerDialog(tk.Toplevel):
 
     def _refresh(self) -> None:
         self.listbox.delete(0, "end")
-        self._windows = [(FULL_SCREEN_HWND, "画面全体（すべてのモニター）")] + list_capture_candidate_windows()
+        monitors = list_monitors()
+        monitor_entries = [
+            (monitor_hwnd(i), f"モニター{i + 1}（{rect[2] - rect[0]}x{rect[3] - rect[1]}）")
+            for i, rect in enumerate(monitors)
+        ]
+        if len(monitors) <= 1:
+            monitor_entries = []  # モニター1台なら「画面全体」と同じなので個別選択肢は出さない
+        self._windows = (
+            [(FULL_SCREEN_HWND, "画面全体（すべてのモニター）")]
+            + monitor_entries
+            + list_capture_candidate_windows()
+        )
         for _hwnd, title in self._windows:
             self.listbox.insert("end", title)
 
@@ -916,22 +1224,32 @@ class WindowPickerDialog(tk.Toplevel):
 
 
 class ShotSelectionDialog(tk.Toplevel):
-    """終了時に、report.html に掲載するスクリーンショットを取捨選択させるダイアログ.
+    """終了時に、report.html に掲載するスクリーンショットをサムネイルで確認しながら
+    取捨選択させるダイアログ.
 
-    既定では全件選択（=掲載）した状態で開く。チェックを外しても screenshots\\ 内の
-    元ファイルは削除されない（report.html への掲載対象から外れるだけ）。
+    キャプチャ内容を確認する手段がレポート生成（HTML化）後しかなかった課題に対応する
+    ため、ここでサムネイルを表示し、ちゃんと撮れているものだけを選んでまとめられる
+    ようにする。既定では全件選択（=掲載）した状態で開く。チェックを外しても
+    screenshots\\ 内の元ファイルは削除されない（report.html への掲載対象から外れる
+    だけ）。
     """
 
-    def __init__(self, parent: tk.Misc, shots: list[dict]):
+    THUMB_WIDTH = 220
+
+    def __init__(self, parent: tk.Misc, shots: list[dict], session_dir: Path):
         super().__init__(parent)
         self.title("掲載するスクリーンショットの選択")
-        self.geometry("520x420")
+        self.geometry("760x620")
+        self.minsize(520, 380)
         self.configure(bg=PALETTE["bg"])
         self.transient(parent)
 
         self.shots = shots
+        self.session_dir = session_dir
         self.cancelled = True
         self.included_files: set = set()
+        self._check_vars: list[tk.BooleanVar] = []
+        self._thumb_images: list[ImageTk.PhotoImage] = []  # GC対策で参照を保持
 
         frm = ttk.Frame(self, padding=12)
         frm.pack(fill="both", expand=True)
@@ -939,45 +1257,40 @@ class ShotSelectionDialog(tk.Toplevel):
         ttk.Label(
             frm,
             text=(
-                "report.html に掲載するスクリーンショットを選んでください（複数選択可）。\n"
-                "選択を外したものも screenshots フォルダには残ります。"
+                "サムネイルを確認し、report.html に掲載するスクリーンショットを選んで\n"
+                "ください（既定は全選択）。選択を外したものも screenshots フォルダには残ります。"
             ),
             justify="left",
         ).pack(fill="x", pady=(0, 6))
 
+        btns = ttk.Frame(frm)
+        btns.pack(fill="x", pady=(0, 6))
+        ttk.Button(btns, text="すべて選択", command=self._select_all).pack(side="left")
+        ttk.Button(btns, text="すべて解除", command=self._deselect_all).pack(side="left", padx=6)
+        ttk.Button(btns, text="autoを除外", command=self._deselect_auto).pack(side="left")
+
         list_frame = ttk.Frame(frm)
         list_frame.pack(fill="both", expand=True)
-        self.listbox = tk.Listbox(
-            list_frame,
-            selectmode="extended",
-            activestyle="dotbox",
-            bg=PALETTE["panel"],
-            fg=PALETTE["text"],
-            selectbackground=PALETTE["accent"],
-            selectforeground=PALETTE["text"],
-            relief="flat",
-            highlightthickness=1,
-            highlightbackground=PALETTE["border"],
-        )
-        scrollbar = ttk.Scrollbar(list_frame, command=self.listbox.yview)
-        self.listbox.configure(yscrollcommand=scrollbar.set)
-        self.listbox.pack(side="left", fill="both", expand=True)
+        canvas = tk.Canvas(list_frame, bg=PALETTE["bg"], highlightthickness=0)
+        scrollbar = ttk.Scrollbar(list_frame, orient="vertical", command=canvas.yview)
+        canvas.configure(yscrollcommand=scrollbar.set)
+        canvas.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
 
-        for shot in self.shots:
-            note_part = f" - {shot['note']}" if shot.get("note") else ""
-            self.listbox.insert("end", f"[{shot['tag']}] {shot['time']}  {shot['file']}{note_part}")
-        self.listbox.selection_set(0, "end")
+        inner = ttk.Frame(canvas)
+        inner_id = canvas.create_window((0, 0), window=inner, anchor="nw")
+        inner.bind(
+            "<Configure>", lambda _e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        canvas.bind("<Configure>", lambda e: canvas.itemconfigure(inner_id, width=e.width))
 
-        btns = ttk.Frame(frm)
-        btns.pack(fill="x", pady=(8, 0))
-        ttk.Button(btns, text="すべて選択", command=lambda: self.listbox.selection_set(0, "end")).pack(
-            side="left"
-        )
-        ttk.Button(btns, text="すべて解除", command=lambda: self.listbox.selection_clear(0, "end")).pack(
-            side="left", padx=6
-        )
-        ttk.Button(btns, text="autoを除外", command=self._deselect_auto).pack(side="left")
+        def _on_wheel(event: tk.Event) -> None:
+            canvas.yview_scroll(int(-event.delta / 120), "units")
+
+        canvas.bind_all("<MouseWheel>", _on_wheel)
+
+        for shot in self.shots:
+            self._build_row(inner, shot)
 
         btns2 = ttk.Frame(frm)
         btns2.pack(fill="x", pady=(8, 0))
@@ -987,14 +1300,78 @@ class ShotSelectionDialog(tk.Toplevel):
         self.bind("<Escape>", lambda _e: self._on_cancel())
         self.grab_set()
 
+    def _load_thumbnail(self, shot: dict) -> Optional[ImageTk.PhotoImage]:
+        img_path = self.session_dir / shot["file"]
+        if not img_path.exists():
+            return None
+        try:
+            with Image.open(img_path) as img:
+                ratio = self.THUMB_WIDTH / img.width
+                size = (self.THUMB_WIDTH, max(1, round(img.height * ratio)))
+                thumb = img.convert("RGB").resize(size, Image.LANCZOS)
+        except Exception:  # noqa: BLE001 - サムネイル生成に失敗しても選択自体は続けたい
+            return None
+        photo = ImageTk.PhotoImage(thumb)
+        self._thumb_images.append(photo)  # 参照保持しないとGCで画像が消える
+        return photo
+
+    def _build_row(self, parent: tk.Misc, shot: dict) -> None:
+        row = ttk.Frame(parent, padding=6)
+        row.pack(fill="x", pady=(0, 4))
+        row.configure(style="ShotRow.TFrame")
+
+        var = tk.BooleanVar(value=True)
+        self._check_vars.append(var)
+        ttk.Checkbutton(row, variable=var).pack(side="left", anchor="n", padx=(0, 8))
+
+        photo = self._load_thumbnail(shot)
+        thumb_frame = tk.Frame(
+            row, width=self.THUMB_WIDTH, height=130, bg=PALETTE["panel"],
+            highlightthickness=1, highlightbackground=PALETTE["border"],
+        )
+        thumb_frame.pack(side="left", padx=(0, 10))
+        thumb_frame.pack_propagate(False)
+        if photo is not None:
+            tk.Label(thumb_frame, image=photo, bg=PALETTE["panel"]).place(relx=0.5, rely=0.5, anchor="center")
+        else:
+            tk.Label(
+                thumb_frame, text="(画像なし)", bg=PALETTE["panel"], fg=PALETTE["muted"]
+            ).place(relx=0.5, rely=0.5, anchor="center")
+
+        note_part = f"\n備考: {shot['note']}" if shot.get("note") else ""
+        info = ttk.Frame(row, style="ShotRow.TFrame")
+        info.pack(side="left", fill="x", expand=True, anchor="n")
+        ttk.Label(
+            info,
+            text=f"[{shot['tag']}] {shot['time']}",
+            style="Status.TLabel" if shot["tag"] == "auto" else "Header.TLabel",
+            background=PALETTE["panel"],
+        ).pack(anchor="w")
+        ttk.Label(info, text=shot["file"], foreground=PALETTE["muted"], background=PALETTE["panel"]).pack(
+            anchor="w"
+        )
+        if note_part:
+            ttk.Label(
+                info, text=note_part.strip(), foreground=PALETTE["mint_dark"], background=PALETTE["panel"]
+            ).pack(anchor="w")
+
+    def _select_all(self) -> None:
+        for var in self._check_vars:
+            var.set(True)
+
+    def _deselect_all(self) -> None:
+        for var in self._check_vars:
+            var.set(False)
+
     def _deselect_auto(self) -> None:
-        for i, shot in enumerate(self.shots):
+        for shot, var in zip(self.shots, self._check_vars):
             if shot["tag"] == "auto":
-                self.listbox.selection_clear(i)
+                var.set(False)
 
     def _on_ok(self) -> None:
-        selected = self.listbox.curselection()
-        self.included_files = {self.shots[i]["file"] for i in selected}
+        self.included_files = {
+            shot["file"] for shot, var in zip(self.shots, self._check_vars) if var.get()
+        }
         self.cancelled = False
         self.destroy()
 
@@ -1074,11 +1451,12 @@ class SourceCheckFrame(ttk.Frame):
         self._build()
 
     def _build(self) -> None:
-        ttk.Label(
+        help_widget = CollapsibleHelp(
             self,
-            text="操作の流れ:  ①対象ファイルを選択 → ②確認したい項目をまとめて追加 → ③確認を実行 → ④結果をHTMLで保存",
-            style="Status.TLabel",
-        ).pack(fill="x", pady=(0, 6))
+            "操作の流れ:  ①対象ファイルを選択 → ②確認したい項目をまとめて追加 → ③確認を実行 → ④結果をHTMLで保存\n"
+            "・一覧の「内容」「期待値」はダブルクリックでその場で編集できます（取込み後の修正用）。",
+        )
+        help_widget.pack(fill="x", pady=(0, 6))
 
         file_row = ttk.Frame(self)
         file_row.pack(fill="x", pady=(0, 6))
@@ -1091,18 +1469,26 @@ class SourceCheckFrame(ttk.Frame):
         ttk.Label(file_row, text="エンコーディング").pack(side="left", padx=(10, 4))
         self.var_encoding = tk.StringVar(value="utf-8")
         ttk.Combobox(
-            file_row, textvariable=self.var_encoding, values=ENCODINGS, width=10, state="readonly"
+            file_row, textvariable=self.var_encoding, values=ENCODINGS, width=COMBO_WIDTH_ENCODING, state="readonly"
         ).pack(side="left")
 
         add_frame = ttk.LabelFrame(self, text="② 確認項目のまとめ追加（1行1項目、複数貼り付け可）")
         add_frame.pack(fill="x", pady=(0, 6))
 
-        ttk.Label(add_frame, text=BULK_CHECK_FORMAT_HELP, foreground=PALETTE["muted"], justify="left").pack(
-            anchor="w", padx=6, pady=(4, 2)
-        )
+        format_help = CollapsibleHelp(add_frame, BULK_CHECK_FORMAT_HELP, wraplength=560)
+        format_help.pack(anchor="w", fill="x", padx=6, pady=(4, 2))
 
         bulk_row = ttk.Frame(add_frame)
         bulk_row.pack(fill="x", padx=6, pady=(0, 6))
+        # ボタン列を先に右側へ確保してから残りをTextに渡す。逆順だとTextが
+        # reqwidth分のスペースを占有し、ボタンが見切れるため。
+        button_col = ttk.Frame(bulk_row)
+        button_col.pack(side="right", padx=(6, 0), anchor="n")
+        ttk.Button(button_col, text="② 項目を追加", style="Primary.TButton", command=self._add_bulk_items).pack(
+            fill="x"
+        )
+        btn_csv = ttk.Button(button_col, text="CSVから読み込み", command=self._load_csv)
+        btn_csv.pack(fill="x", pady=(4, 0))
         self.bulk_text = tk.Text(
             bulk_row,
             height=4,
@@ -1113,43 +1499,30 @@ class SourceCheckFrame(ttk.Frame):
             highlightbackground=PALETTE["border"],
             font=(FONT_FAMILY, FONT_SIZE),
         )
-        self.bulk_text.pack(side="left", fill="x", expand=True)
-        button_col = ttk.Frame(bulk_row)
-        button_col.pack(side="left", padx=(6, 0), anchor="n")
-        ttk.Button(button_col, text="② 項目を追加", style="Primary.TButton", command=self._add_bulk_items).pack(
-            fill="x"
-        )
-        btn_csv = ttk.Button(button_col, text="CSVから読み込み", command=self._load_csv)
-        btn_csv.pack(fill="x", pady=(4, 0))
-        Tooltip(
-            btn_csv,
-            "確認項目を書いたCSVファイルを読み込みます。\n"
-            "列名（1行目）に 種別/内容(または変数名・条件式・正規表現)/期待値/名称 を\n"
-            "含めると自動で認識します。列名が無い場合は1列目を内容、2列目を期待値として\n"
-            "扱います（種別は省略時「変数定義」）。",
-        )
+        self.bulk_text.pack(side="left", fill="both", expand=True)
 
-        columns = ("kind", "detail", "result", "matched")
+        columns = ("kind", "content", "expected", "result", "matched")
         tree_frame = ttk.Frame(self)
-        tree_frame.pack(fill="both", expand=True, pady=(0, 6))
         self.tree = ttk.Treeview(
             tree_frame, columns=columns, show="headings", selectmode="extended", height=7
         )
         self.tree.heading("kind", text="種別")
-        self.tree.heading("detail", text="名称")
+        self.tree.heading("content", text="内容")
+        self.tree.heading("expected", text="期待値")
         self.tree.heading("result", text="結果")
         self.tree.heading("matched", text="該当行")
-        self.tree.column("kind", width=90, anchor="w")
-        self.tree.column("detail", width=180, anchor="w")
+        self.tree.column("kind", width=85, anchor="w")
+        self.tree.column("content", width=140, anchor="w")
+        self.tree.column("expected", width=100, anchor="w")
         self.tree.column("result", width=50, anchor="center")
-        self.tree.column("matched", width=280, anchor="w")
+        self.tree.column("matched", width=235, anchor="w")
         tree_scroll = ttk.Scrollbar(tree_frame, command=self.tree.yview)
         self.tree.configure(yscrollcommand=tree_scroll.set)
         self.tree.pack(side="left", fill="both", expand=True)
         tree_scroll.pack(side="right", fill="y")
+        self.tree.bind("<Double-1>", self._on_tree_double_click)
 
         select_frame = ttk.Frame(self)
-        select_frame.pack(fill="x")
         ttk.Button(select_frame, text="すべて選択", command=lambda: self.tree.selection_set(self.tree.get_children())).pack(
             side="left"
         )
@@ -1161,33 +1534,107 @@ class SourceCheckFrame(ttk.Frame):
         ttk.Button(select_frame, text="選択項目を削除", command=self._delete_selected).pack(side="left")
 
         action_frame = ttk.Frame(self)
-        action_frame.pack(fill="x", pady=(4, 0))
         ttk.Button(
             action_frame, text="③ 確認を実行", style="Capture.TButton", command=self._run_checks
         ).pack(side="left")
         ttk.Label(action_frame, text="出力先フォルダ").pack(side="left", padx=(12, 4))
         self.var_output = tk.StringVar(value="evidence")
-        ttk.Entry(action_frame, textvariable=self.var_output, width=18).pack(side="left")
+        ttk.Entry(action_frame, textvariable=self.var_output, width=ENTRY_WIDTH_TEXT).pack(side="left")
         ttk.Button(action_frame, text="参照...", command=self._browse_output).pack(side="left", padx=4)
         ttk.Button(
             action_frame, text="④ 結果をHTMLで保存", style="Finish.TButton", command=self._export_html
         ).pack(side="left", padx=(12, 0))
 
+        # 可変要素(Treeview)より先にボタン行を下端へ固定し、ウィンドウを縮小しても
+        # 操作ボタンが画面外に出ないようにする（Treeview側だけが縮小される）。
+        action_frame.pack(side="bottom", fill="x", pady=(4, 0))
+        select_frame.pack(side="bottom", fill="x")
+        tree_frame.pack(fill="both", expand=True, pady=(0, 6))
+
     def _browse_file(self) -> None:
         path = filedialog.askopenfilename(title="確認対象ファイルを選択")
         if path:
             self.var_file.set(path)
+            self.var_encoding.set(detect_encoding(path))
 
     def _browse_output(self) -> None:
         path = filedialog.askdirectory(title="出力先フォルダを選択")
         if path:
             self.var_output.set(path)
 
-    def _add_bulk_items(self) -> None:
-        raw_text = self.bulk_text.get("1.0", "end")
+    def _register_item(self, item: "CheckItem") -> None:
+        item_id = str(self._next_id)
+        self._next_id += 1
+        self.items[item_id] = item
+        self.tree.insert("", "end", iid=item_id, values=self._row_values(item))
+
+    @staticmethod
+    def _row_values(item: "CheckItem") -> tuple[str, str, str, str, str]:
+        return (
+            SourceCheckFrame._kind_label(item.kind),
+            item.content,
+            item.expected,
+            item.result,
+            item.matched_line,
+        )
+
+    def _on_tree_double_click(self, event: tk.Event) -> None:
+        """一覧の「内容」「期待値」セルをダブルクリックでその場編集できるようにする."""
+        if self.tree.identify("region", event.x, event.y) != "cell":
+            return
+        row_id = self.tree.identify_row(event.y)
+        col_id = self.tree.identify_column(event.x)
+        item = self.items.get(row_id)
+        if item is None:
+            return
+
+        columns = self.tree["columns"]
+        try:
+            col_name = columns[int(col_id.replace("#", "")) - 1]
+        except (ValueError, IndexError):
+            return
+        if col_name not in ("content", "expected"):
+            return  # 種別・結果・該当行は確認実行で決まるため編集対象外
+
+        bbox = self.tree.bbox(row_id, col_id)
+        if not bbox:
+            return
+        x, y, width, height = bbox
+
+        current_value = item.content if col_name == "content" else item.expected
+        edit_var = tk.StringVar(value=current_value)
+        entry = ttk.Entry(self.tree, textvariable=edit_var)
+        entry.place(x=x, y=y, width=width, height=height)
+        entry.focus_set()
+        entry.select_range(0, "end")
+
+        def commit(_event: object = None) -> None:
+            if not entry.winfo_exists():
+                return
+            new_value = edit_var.get().strip()
+            if col_name == "content":
+                item.content = new_value
+            else:
+                item.expected = new_value
+            # 内容/期待値を変えたら、以前の確認結果は意味を持たないためリセットする。
+            item.result = "-"
+            item.matched_line = ""
+            self.tree.item(row_id, values=self._row_values(item))
+            entry.destroy()
+
+        def cancel(_event: object = None) -> None:
+            if entry.winfo_exists():
+                entry.destroy()
+
+        entry.bind("<Return>", commit)
+        entry.bind("<FocusOut>", commit)
+        entry.bind("<Escape>", cancel)
+
+    def _add_items_from_lines(self, lines: list[str]) -> tuple[int, list[str]]:
+        """「まとめ追加」と同じ1行1項目形式の行リストを机上確認項目として登録する."""
         added = 0
         errors: list[str] = []
-        for line_no, line in enumerate(raw_text.splitlines(), start=1):
+        for line_no, line in enumerate(lines, start=1):
             try:
                 item = parse_bulk_check_line(line)
             except re.error as exc:
@@ -1200,25 +1647,40 @@ class SourceCheckFrame(ttk.Frame):
             except re.error as exc:
                 errors.append(f"{line_no}行目: 正規表現エラー: {exc}")
                 continue
-
-            item_id = str(self._next_id)
-            self._next_id += 1
-            self.items[item_id] = item
-            self.tree.insert(
-                "", "end", iid=item_id, values=(self._kind_label(item.kind), item.label, item.result, "")
-            )
+            self._register_item(item)
             added += 1
+        return added, errors
 
+    def _add_bulk_items(self) -> None:
+        raw_text = self.bulk_text.get("1.0", "end")
+        added, errors = self._add_items_from_lines(raw_text.splitlines())
         self.bulk_text.delete("1.0", "end")
         self._log(f"机上確認項目を{added}件追加しました" + (f"（エラー{len(errors)}件）" if errors else ""))
         if errors:
             messagebox.showwarning("一部の行を追加できませんでした", "\n".join(errors))
 
+    def _load_text_file(self, path: str) -> None:
+        """.txt ファイルを「まとめ追加」と同じ1行1項目形式として読み込む（CSVの列分割は行わない）."""
+        try:
+            text = Path(path).read_text(encoding=detect_encoding(path))
+        except OSError as exc:
+            messagebox.showerror("読み込みエラー", f"ファイルを読み込めません: {exc}")
+            return
+        added, errors = self._add_items_from_lines(text.splitlines())
+        self._log(
+            f"テキストファイルから机上確認項目を{added}件読み込みました" + (f"（エラー{len(errors)}件）" if errors else "")
+        )
+        if errors:
+            messagebox.showwarning("一部の行を読み込めませんでした", "\n".join(errors))
+
     def _load_csv(self) -> None:
         path = filedialog.askopenfilename(
-            title="確認項目CSVを選択", filetypes=[("CSV", "*.csv"), ("すべてのファイル", "*.*")]
+            title="確認項目CSV/テキストを選択", filetypes=[("CSV/テキスト", "*.csv *.txt"), ("すべてのファイル", "*.*")]
         )
         if not path:
+            return
+        if Path(path).suffix.lower() == ".txt":
+            self._load_text_file(path)
             return
         try:
             header, data_rows = read_csv_table(path)
@@ -1261,31 +1723,20 @@ class SourceCheckFrame(ttk.Frame):
             label = cell(row, idx_label)
 
             if kind_raw in ("分岐", "if", "branch", "分岐(if)"):
-                pattern = build_branch_pattern(content)
                 kind_key = "branch"
-                default_label = f"if: {content}"
             elif kind_raw in ("カスタム", "regex", "custom", "正規表現", "カスタム正規表現"):
-                pattern = content
                 kind_key = "custom"
-                default_label = content
             else:
-                pattern = build_variable_pattern(content, expected)
                 kind_key = "variable"
-                default_label = f"変数: {content}" + (f" = {expected}" if expected else "")
 
+            item = CheckItem(kind=kind_key, content=content, expected=expected, custom_label=label)
             try:
-                re.compile(pattern)
+                re.compile(item.pattern)
             except re.error as exc:
                 errors.append(f"{line_no}行目: 正規表現エラー: {exc}")
                 continue
 
-            item = CheckItem(kind=kind_key, label=label or default_label, pattern=pattern)
-            item_id = str(self._next_id)
-            self._next_id += 1
-            self.items[item_id] = item
-            self.tree.insert(
-                "", "end", iid=item_id, values=(self._kind_label(item.kind), item.label, item.result, "")
-            )
+            self._register_item(item)
             added += 1
 
         self._log(f"CSVから机上確認項目を{added}件読み込みました" + (f"（エラー{len(errors)}件）" if errors else ""))
@@ -1326,9 +1777,7 @@ class SourceCheckFrame(ttk.Frame):
             else:
                 item.result = "NG"
                 item.matched_line = "(該当なし)"
-            self.tree.item(
-                item_id, values=(self._kind_label(item.kind), item.label, item.result, item.matched_line)
-            )
+            self.tree.item(item_id, values=self._row_values(item))
 
         self._log(f"机上確認: {len(self.items)}件中 {ok_count}件OK ({Path(path_str).name})")
 
@@ -1338,14 +1787,7 @@ class SourceCheckFrame(ttk.Frame):
             kind_key, kind_key
         )
 
-    def _export_html(self) -> None:
-        if not self.items:
-            messagebox.showinfo("確認項目なし", "確認項目がありません")
-            return
-        out_dir = Path(self.var_output.get().strip() or "evidence")
-        out_dir.mkdir(parents=True, exist_ok=True)
-        report_path = out_dir / f"sourcecheck_{datetime.now().strftime('%Y%m%d_%H%M%S')}.html"
-
+    def _build_report_html(self) -> str:
         rows_html = "".join(
             _CHECK_ROW_TEMPLATE.format(
                 kind=html.escape(self._kind_label(item.kind)),
@@ -1357,7 +1799,7 @@ class SourceCheckFrame(ttk.Frame):
             for item in self.items.values()
         )
         ok_count = sum(1 for item in self.items.values() if item.result == "OK")
-        report_html = _CHECK_REPORT_TEMPLATE.format(
+        return _CHECK_REPORT_TEMPLATE.format(
             file_name=html.escape(Path(self.var_file.get()).name),
             file_path=html.escape(self.var_file.get()),
             checked_at=datetime.now().isoformat(timespec="seconds"),
@@ -1365,11 +1807,21 @@ class SourceCheckFrame(ttk.Frame):
             total_count=len(self.items),
             rows_html=rows_html,
         )
-        report_path.write_text(report_html, encoding="utf-8")
+
+    def _report_output_path(self, suffix: str) -> Path:
+        out_dir = Path(self.var_output.get().strip() or "evidence")
+        out_dir.mkdir(parents=True, exist_ok=True)
+        return out_dir / f"sourcecheck_{datetime.now().strftime('%Y%m%d_%H%M%S')}{suffix}"
+
+    def _export_html(self) -> None:
+        if not self.items:
+            messagebox.showinfo("確認項目なし", "確認項目がありません")
+            return
+        report_path = self._report_output_path(".html")
+        report_path.write_text(self._build_report_html(), encoding="utf-8")
         self._log(f"机上確認結果を保存しました: {report_path}")
         if messagebox.askyesno("完了", "保存した確認結果を開きますか？"):
             os.startfile(report_path)  # noqa: S606 - ユーザー自身が生成したローカルファイルを開く
-
 
 class InstrumentFrame(ttk.Frame):
     """変数定義の直後に動作確認用の出力コードを挿入するタブ.
@@ -1388,14 +1840,18 @@ class InstrumentFrame(ttk.Frame):
         self._build()
 
     def _build(self) -> None:
-        ttk.Label(
+        help_widget = CollapsibleHelp(
             self,
-            text=(
-                "操作の流れ:  ①対象ファイルを選択 → ②変数名を入力して候補を検索 → "
-                "③挿入箇所を選択 → ④テンプレートを選んで挿入"
-            ),
-            style="Status.TLabel",
-        ).pack(fill="x", pady=(0, 6))
+            "操作の流れ:  ①対象ファイルを選択 → ②変数名を入力して候補を検索 → "
+            "③挿入箇所を選択 → ④テンプレートを選んで挿入\n"
+            "\n"
+            "・変数名: 例: threshold, bonus。1行に1つずつ改行で入力してもOKです。\n"
+            "・CSVから読込: .csvは変数名を書いたファイル（1列でも複数列でも可）、.txtは机上確認の\n"
+            "  「変数名」「変数名 = 期待値」と同じ書式（=より前だけを使用）を読み込めます。\n"
+            "・保存先サフィックス: 生成されるファイル名に付く接尾辞です。元のファイル名が sample.py なら\n"
+            "  sample_instrumented.py として、元ファイルとは別の新しいファイルが作られます。",
+        )
+        help_widget.pack(fill="x", pady=(0, 6))
 
         file_row = ttk.Frame(self)
         file_row.pack(fill="x", pady=(0, 6))
@@ -1408,7 +1864,7 @@ class InstrumentFrame(ttk.Frame):
         ttk.Label(file_row, text="エンコーディング").pack(side="left", padx=(10, 4))
         self.var_encoding = tk.StringVar(value="utf-8")
         ttk.Combobox(
-            file_row, textvariable=self.var_encoding, values=ENCODINGS, width=10, state="readonly"
+            file_row, textvariable=self.var_encoding, values=ENCODINGS, width=COMBO_WIDTH_ENCODING, state="readonly"
         ).pack(side="left")
 
         search_frame = ttk.Frame(self)
@@ -1419,7 +1875,7 @@ class InstrumentFrame(ttk.Frame):
         self.names_text = tk.Text(
             search_frame,
             height=3,
-            width=30,
+            width=ENTRY_WIDTH_TEXT,
             bg=PALETTE["panel"],
             fg=PALETTE["text"],
             relief="flat",
@@ -1428,17 +1884,14 @@ class InstrumentFrame(ttk.Frame):
             font=(FONT_FAMILY, FONT_SIZE),
         )
         self.names_text.pack(side="left", padx=6, fill="x", expand=True)
-        Tooltip(self.names_text, "確認したい変数の名前を入力します。\n例: threshold, bonus\nまたは1行に1つずつ改行で入力してもOKです。")
         btn_col = ttk.Frame(search_frame)
         btn_col.pack(side="left", anchor="n")
         ttk.Button(btn_col, text="候補を検索", style="Capture.TButton", command=self._search).pack(fill="x")
         btn_csv = ttk.Button(btn_col, text="CSVから読込", command=self._load_csv)
         btn_csv.pack(fill="x", pady=(4, 0))
-        Tooltip(btn_csv, "変数名を書いたCSV（1列でも複数列でも可）を読み込み、変数名欄に追加します。")
 
         columns = ("var", "line", "content")
         tree_frame = ttk.Frame(self)
-        tree_frame.pack(fill="both", expand=True, pady=(0, 6))
         self.tree = ttk.Treeview(
             tree_frame, columns=columns, show="headings", selectmode="extended", height=6
         )
@@ -1454,7 +1907,6 @@ class InstrumentFrame(ttk.Frame):
         tree_scroll.pack(side="right", fill="y")
 
         select_frame = ttk.Frame(self)
-        select_frame.pack(fill="x", pady=(0, 6))
         ttk.Label(select_frame, text="③ 挿入したい行を選択:").pack(side="left")
         ttk.Button(
             select_frame,
@@ -1467,17 +1919,12 @@ class InstrumentFrame(ttk.Frame):
             command=lambda: self.tree.selection_remove(self.tree.get_children()),
         ).pack(side="left", padx=6)
 
-        ttk.Label(
+        template_help = CollapsibleHelp(
             self,
-            text=(
-                "④ 出力テンプレート（言語ごとのひな形を選べます。{name} の部分は挿入時に"
-                "実際の変数名へ自動的に置き換わるプレースホルダーです）"
-            ),
-            wraplength=620,
-            justify="left",
-        ).pack(anchor="w")
+            "④ 出力テンプレート（言語ごとのひな形を選べます。{name} の部分は挿入時に"
+            "実際の変数名へ自動的に置き換わるプレースホルダーです）",
+        )
         template_row = ttk.Frame(self)
-        template_row.pack(fill="x", pady=(2, 2))
         ttk.Label(template_row, text="言語/書式:").pack(side="left")
         self.var_preset = tk.StringVar(value=next(iter(OUTPUT_TEMPLATES)))
         preset_combo = ttk.Combobox(
@@ -1500,32 +1947,25 @@ class InstrumentFrame(ttk.Frame):
             highlightbackground=PALETTE["border"],
             font=(FONT_FAMILY, FONT_SIZE),
         )
-        self.template_text.pack(fill="x", pady=(4, 2))
         self.template_text.bind("<KeyRelease>", lambda _e: self._update_preview())
 
         self.preview_var = tk.StringVar()
-        ttk.Label(
+        preview_label = ttk.Label(
             self,
             textvariable=self.preview_var,
             foreground=PALETTE["mint_dark"],
             wraplength=620,
             justify="left",
-        ).pack(fill="x", pady=(0, 6), anchor="w")
+        )
 
         self.tree.bind("<<TreeviewSelect>>", lambda _e: self._update_preview())
         self._apply_preset()
 
         action_frame = ttk.Frame(self)
-        action_frame.pack(fill="x")
         ttk.Label(action_frame, text="保存先サフィックス").pack(side="left")
         self.var_suffix = tk.StringVar(value="_instrumented")
-        suffix_entry = ttk.Entry(action_frame, textvariable=self.var_suffix, width=16)
+        suffix_entry = ttk.Entry(action_frame, textvariable=self.var_suffix, width=ENTRY_WIDTH_TEXT)
         suffix_entry.pack(side="left", padx=6)
-        Tooltip(
-            suffix_entry,
-            "生成されるファイル名に付く接尾辞です。元のファイル名が sample.py なら\n"
-            "sample_instrumented.py として、元ファイルとは別の新しいファイルが作られます。",
-        )
         ttk.Button(
             action_frame,
             text="選択箇所に挿入してファイル生成",
@@ -1533,10 +1973,21 @@ class InstrumentFrame(ttk.Frame):
             command=self._apply_instrumentation,
         ).pack(side="left", padx=(6, 0))
 
+        # 可変要素(Treeview)より下に来る要素群は下端に固定し、ウィンドウを縮小しても
+        # テンプレート選択・実行ボタンが画面外に出ないようにする（Treeview側だけが縮小される）。
+        action_frame.pack(side="bottom", fill="x")
+        preview_label.pack(side="bottom", fill="x", pady=(0, 6), anchor="w")
+        self.template_text.pack(side="bottom", fill="x", pady=(4, 2))
+        template_row.pack(side="bottom", fill="x", pady=(2, 2))
+        template_help.pack(side="bottom", fill="x", anchor="w")
+        select_frame.pack(side="bottom", fill="x", pady=(0, 6))
+        tree_frame.pack(fill="both", expand=True, pady=(0, 6))
+
     def _browse_file(self) -> None:
         path = filedialog.askopenfilename(title="対象ファイルを選択")
         if path:
             self.var_file.set(path)
+            self.var_encoding.set(detect_encoding(path))
 
     def _apply_preset(self) -> None:
         template = OUTPUT_TEMPLATES.get(self.var_preset.get(), "{name}")
@@ -1557,26 +2008,37 @@ class InstrumentFrame(ttk.Frame):
 
     def _load_csv(self) -> None:
         path = filedialog.askopenfilename(
-            title="変数名CSVを選択", filetypes=[("CSV", "*.csv"), ("すべてのファイル", "*.*")]
+            title="変数名CSV/テキストを選択", filetypes=[("CSV/テキスト", "*.csv *.txt"), ("すべてのファイル", "*.*")]
         )
         if not path:
             return
-        try:
-            header, data_rows = read_csv_table(path)
-        except (OSError, UnicodeDecodeError) as exc:
-            messagebox.showerror("読み込みエラー", f"CSVを読み込めません: {exc}")
-            return
 
-        names = [cell.strip() for row in ([header] + data_rows) for cell in row if cell and cell.strip()]
+        if Path(path).suffix.lower() == ".txt":
+            try:
+                text = Path(path).read_text(encoding=detect_encoding(path))
+            except OSError as exc:
+                messagebox.showerror("読み込みエラー", f"ファイルを読み込めません: {exc}")
+                return
+            # .txt は机上確認の「まとめ追加」と同じ書式（変数名 / 変数名 = 期待値）を想定し、
+            # = より前の変数名部分だけを取り出す（CSVの列分割は行わない）。
+            names = extract_variable_names_from_text(text.splitlines())
+        else:
+            try:
+                header, data_rows = read_csv_table(path)
+            except (OSError, UnicodeDecodeError) as exc:
+                messagebox.showerror("読み込みエラー", f"CSVを読み込めません: {exc}")
+                return
+            names = [cell.strip() for row in ([header] + data_rows) for cell in row if cell and cell.strip()]
+
         if not names:
-            messagebox.showinfo("読み込み結果", "CSVから変数名が見つかりませんでした")
+            messagebox.showinfo("読み込み結果", "ファイルから変数名が見つかりませんでした")
             return
 
         current = self.names_text.get("1.0", "end").strip()
         combined = (current + "\n" if current else "") + "\n".join(names)
         self.names_text.delete("1.0", "end")
         self.names_text.insert("1.0", combined)
-        self._log(f"CSVから変数名を{len(names)}件読み込みました")
+        self._log(f"ファイルから変数名を{len(names)}件読み込みました")
 
     def _search(self) -> None:
         path_str = self.var_file.get().strip()
@@ -1649,8 +2111,7 @@ class EvToolApp:
         self.root.minsize(480, 380)
         _apply_theme(self.root)
 
-        self._icon_images = _build_app_icon()
-        self.root.iconphoto(True, *self._icon_images)
+        self._icon_images = _set_app_icon(self.root)
 
         self.session: Optional[EvidenceSession] = None
         self.target_hwnd: Optional[int] = None
@@ -1659,6 +2120,7 @@ class EvToolApp:
         self._entries: list[tk.Widget] = []
         self._test_id_history: list[str] = []
         self._title_history: list[str] = []
+        self._normal_geometry: str = ""
 
         self._build_widgets()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
@@ -1666,30 +2128,101 @@ class EvToolApp:
 
     # ---- widgets ---------------------------------------------------------
     def _build_widgets(self) -> None:
-        ttk.Label(self.root, text="evtool", style="Header.TLabel", padding=(10, 8, 10, 4)).pack(
-            anchor="w"
+        self.title_label = ttk.Label(
+            self.root, text="evtool", style="Header.TLabel", padding=(10, 8, 10, 4)
         )
+        self.title_label.pack(anchor="w")
 
-        notebook = ttk.Notebook(self.root)
-        notebook.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self.notebook = ttk.Notebook(self.root)
+        self.notebook.pack(fill="both", expand=True, padx=8, pady=(0, 8))
 
-        capture_tab = ttk.Frame(notebook)
-        notebook.add(capture_tab, text="エビデンス取得")
+        capture_tab = ttk.Frame(self.notebook)
+        self.notebook.add(capture_tab, text="エビデンス取得")
         self._build_capture_tab(capture_tab)
 
-        check_tab = SourceCheckFrame(notebook, log_callback=self._log)
-        notebook.add(check_tab, text="机上確認")
+        check_tab = SourceCheckFrame(self.notebook, log_callback=self._log)
+        self.notebook.add(check_tab, text="机上確認")
 
-        instrument_tab = InstrumentFrame(notebook, log_callback=self._log)
-        notebook.add(instrument_tab, text="動作確認コード挿入")
+        instrument_tab = InstrumentFrame(self.notebook, log_callback=self._log)
+        self.notebook.add(instrument_tab, text="動作確認コード挿入")
+
+        self.capture_mode_frame = self._build_capture_mode_frame(self.root)
+
+    def _build_capture_mode_frame(self, parent: tk.Widget) -> ttk.Frame:
+        """キャプチャ中だけ表示するコンパクトなUI（今すぐキャプチャ・停止のみ）を作る.
+
+        通常のフォーム・ログ欄を隠してウィンドウを小さくすることで、対象アプリの
+        操作画面を占有しすぎず、手元に置いたまま手動キャプチャ・終了操作だけを
+        行えるようにする。
+        """
+        frame = ttk.Frame(parent, padding=12)
+
+        self.capture_mode_info_var = tk.StringVar()
+        ttk.Label(
+            frame,
+            textvariable=self.capture_mode_info_var,
+            style="Header.TLabel",
+            wraplength=300,
+            justify="left",
+        ).pack(anchor="w", pady=(0, 10))
+
+        ttk.Button(
+            frame, text="今すぐキャプチャ", style="Capture.TButton", command=self._on_capture
+        ).pack(fill="x")
+
+        note_row = ttk.Frame(frame)
+        note_row.pack(fill="x", pady=(6, 0))
+        ttk.Label(note_row, text="備考:").pack(side="left")
+        ttk.Entry(note_row, textvariable=self.var_shot_note).pack(
+            side="left", fill="x", expand=True, padx=(4, 0)
+        )
+
+        ttk.Button(frame, text="停止して終了", style="Finish.TButton", command=self._on_finish).pack(
+            fill="x", pady=(10, 0)
+        )
+
+        ttk.Label(
+            frame,
+            textvariable=self.capture_warning_var,
+            style="Warning.TLabel",
+            wraplength=300,
+            justify="left",
+        ).pack(anchor="w", pady=(8, 0))
+
+        return frame
+
+    def _enter_capture_mode(self) -> None:
+        self._normal_geometry = self.root.geometry()
+        self.title_label.pack_forget()
+        self.notebook.pack_forget()
+        self.capture_mode_info_var.set(
+            f"{self.var_test_id.get()} - {self.var_title.get()}\n対象: {self.target_window_label}"
+        )
+        self.capture_mode_frame.pack(fill="both", expand=True)
+        self.root.minsize(260, 170)
+        self.root.geometry("300x190")
+        self.root.attributes("-topmost", True)
+
+    def _exit_capture_mode(self) -> None:
+        self.capture_mode_frame.pack_forget()
+        self.root.attributes("-topmost", False)
+        self.title_label.pack(anchor="w")
+        self.notebook.pack(fill="both", expand=True, padx=8, pady=(0, 8))
+        self.root.minsize(480, 380)
+        if self._normal_geometry:
+            self.root.geometry(self._normal_geometry)
 
     def _build_capture_tab(self, parent: tk.Widget) -> None:
-        ttk.Label(
+        help_widget = CollapsibleHelp(
             parent,
-            text="操作の流れ:  ①対象ウィンドウを選択 → ②開始 → ③今すぐキャプチャ（必要なら自動も） → ④終了してまとめる",
-            style="Status.TLabel",
-            padding=(10, 6, 10, 0),
-        ).pack(fill="x")
+            "操作の流れ:  ①対象ウィンドウを選択 → ②開始 → ③今すぐキャプチャ（必要なら自動も） → ④終了してまとめる\n"
+            "・試験ID/試験項目名は▼から履歴を選べます（試験IDは終了時に末尾の数字を自動で+1）。\n"
+            "・対象ウィンドウは選択後にタイトルが変わっても追跡を継続。「画面全体」で全モニター、\n"
+            "  「モニターN」で1台だけを取得できます（複数モニター使用時に選択肢に表示）。\n"
+            "・自動キャプチャは既定OFF（手動のみ）。チェックすると指定間隔でも自動取得します。\n"
+            "・実行ログファイル(任意)は終了時にコピーされ、レポートに添付されます。",
+        )
+        help_widget.pack(fill="x", padx=10, pady=(6, 0))
 
         form = ttk.Frame(parent, padding=10)
         form.pack(fill="x")
@@ -1704,7 +2237,7 @@ class EvToolApp:
         self.var_log_file = tk.StringVar()
         self.var_shot_note = tk.StringVar()
 
-        def add_row(row: int, label: str, var: tk.StringVar, browse=None, width=40):
+        def add_row(row: int, label: str, var: tk.StringVar, browse=None, width=ENTRY_WIDTH_TEXT):
             ttk.Label(form, text=label).grid(row=row, column=0, sticky="w", pady=4)
             entry = ttk.Entry(form, textvariable=var, width=width)
             entry.grid(row=row, column=1, sticky="we", padx=(6, 6), pady=4)
@@ -1714,33 +2247,20 @@ class EvToolApp:
             return entry
 
         ttk.Label(form, text="試験ID *").grid(row=0, column=0, sticky="w", pady=4)
-        self.combo_test_id = ttk.Combobox(form, textvariable=self.var_test_id, width=38)
+        self.combo_test_id = ttk.Combobox(form, textvariable=self.var_test_id, width=ENTRY_WIDTH_TEXT)
         self.combo_test_id.grid(row=0, column=1, sticky="we", padx=(6, 6), pady=4)
         self._entries.append(self.combo_test_id)
-        Tooltip(
-            self.combo_test_id,
-            "試験IDを入力します。前回末尾が数字（例: TC001）であれば、\n"
-            "「終了してまとめる」後に自動的に次の番号（TC002）を入力しておきます。\n"
-            "過去に使ったIDは▼から選べます。",
-        )
 
         ttk.Label(form, text="試験項目名 *").grid(row=1, column=0, sticky="w", pady=4)
-        self.combo_title = ttk.Combobox(form, textvariable=self.var_title, width=38)
+        self.combo_title = ttk.Combobox(form, textvariable=self.var_title, width=ENTRY_WIDTH_TEXT)
         self.combo_title.grid(row=1, column=1, sticky="we", padx=(6, 6), pady=4)
         self._entries.append(self.combo_title)
-        Tooltip(self.combo_title, "試験項目名を入力します。過去に使った項目名は▼から選べます。")
 
         ttk.Label(form, text="対象ウィンドウ *").grid(row=2, column=0, sticky="w", pady=4)
         window_entry = ttk.Entry(form, textvariable=self.var_window_display, state="readonly")
         window_entry.grid(row=2, column=1, sticky="we", padx=(6, 6), pady=4)
         self.btn_pick_window = ttk.Button(form, text="選択...", command=self._on_pick_window)
         self.btn_pick_window.grid(row=2, column=2, pady=4)
-        Tooltip(
-            self.btn_pick_window,
-            "現在開いているウィンドウの一覧から、キャプチャしたい画面を選びます。\n"
-            "選択後はウィンドウのタイトルが変わっても、同じウィンドウを追跡し続けます。\n"
-            "一覧先頭の「画面全体」を選ぶと、デスクトップ全体をキャプチャできます。",
-        )
 
         auto_frame = ttk.Frame(form)
         auto_frame.grid(row=3, column=0, columnspan=3, sticky="we", pady=4)
@@ -1751,26 +2271,15 @@ class EvToolApp:
             command=self._on_toggle_auto,
         )
         self.chk_auto.pack(side="left")
-        Tooltip(
-            self.chk_auto,
-            "チェックしない場合（既定）は「今すぐキャプチャ」ボタンを押したときだけ記録します。\n"
-            "チェックすると、それに加えて指定した間隔(秒)で自動的にもキャプチャします。",
-        )
         ttk.Label(auto_frame, text="間隔(秒)").pack(side="left", padx=(12, 4))
-        self.entry_interval = ttk.Entry(auto_frame, textvariable=self.var_interval, width=8, state="disabled")
+        self.entry_interval = ttk.Entry(
+            auto_frame, textvariable=self.var_interval, width=ENTRY_WIDTH_SHORT, state="disabled"
+        )
         self.entry_interval.pack(side="left")
         self._entries.append(self.entry_interval)
 
         add_row(4, "出力先フォルダ", self.var_output, browse=self._browse_output)
-        log_entry = add_row(5, "Tera Termのログファイル(任意)", self.var_log_file, browse=self._browse_log_file)
-        Tooltip(
-            log_entry,
-            "Tera Term側で「ファイル > ログ」やマクロの logopen で保存している、\n"
-            "コマンドの入出力を記録したテキストファイルです（評価したい操作と直接の\n"
-            "関係はありません。任意項目で、指定しなくても画面キャプチャだけで進められます）。\n"
-            "指定すると、「終了してまとめる」時にその内容がコピーされ、\n"
-            "evidenceフォルダ内に textlog.log として保存・レポートに添付されます。",
-        )
+        add_row(5, "実行ログファイル(任意)", self.var_log_file, browse=self._browse_log_file)
 
         btn_frame = ttk.Frame(parent, padding=(10, 0, 10, 8))
         btn_frame.pack(fill="x")
@@ -1797,14 +2306,22 @@ class EvToolApp:
         self.btn_finish.pack(side="left", padx=(12, 0))
 
         self.status_var = tk.StringVar(value="待機中")
-        ttk.Label(parent, textvariable=self.status_var, style="Status.TLabel", padding=(10, 0, 10, 4)).pack(
-            fill="x"
+        self.status_label = ttk.Label(
+            parent, textvariable=self.status_var, style="Status.TLabel", padding=(10, 0, 10, 4)
         )
+        self.status_label.pack(fill="x")
+
+        self.capture_warning_var = tk.StringVar(value="")
+        self.capture_warning_label = ttk.Label(
+            parent, textvariable=self.capture_warning_var, style="Warning.TLabel", padding=(10, 0, 10, 4)
+        )
+        self.capture_warning_label.pack(fill="x")
 
         log_frame = ttk.Frame(parent, padding=(10, 0, 10, 10))
         log_frame.pack(fill="both", expand=True)
         self.log_text = tk.Text(
             log_frame,
+            height=6,
             state="disabled",
             wrap="word",
             bg=PALETTE["panel"],
@@ -1825,7 +2342,7 @@ class EvToolApp:
             self.var_output.set(path)
 
     def _browse_log_file(self) -> None:
-        path = filedialog.askopenfilename(title="Tera Term ログファイルを選択")
+        path = filedialog.askopenfilename(title="実行ログファイルを選択")
         if path:
             self.var_log_file.set(path)
 
@@ -1835,6 +2352,24 @@ class EvToolApp:
         if dialog.selected is not None:
             self.target_hwnd, self.target_window_label = dialog.selected
             self.var_window_display.set(self.target_window_label)
+            self._preview_target_window()
+
+    def _preview_target_window(self) -> None:
+        """選択した対象を試し撮りし、正しく映っているかをその場で確認できるようにする."""
+        tmp_path = Path(tempfile.gettempdir()) / f"evtool_preview_{os.getpid()}.png"
+        try:
+            if self.target_hwnd == FULL_SCREEN_HWND:
+                capture_full_screen(tmp_path)
+            elif is_monitor_hwnd(self.target_hwnd):
+                monitors = list_monitors()
+                index = monitor_index_from_hwnd(self.target_hwnd)
+                capture_monitor(monitors[index], tmp_path)
+            else:
+                capture_window(self.target_hwnd, tmp_path)
+        except Exception as exc:  # noqa: BLE001 - プレビューに失敗しても選択自体は続行する
+            self._log(f"警告: プレビューの取得に失敗しました: {exc}")
+            return
+        CapturePreviewPopup(self.root, tmp_path, caption=f"対象: {self.target_window_label}")
 
     def _on_toggle_auto(self) -> None:
         self.entry_interval.configure(state="normal" if self.var_auto_capture.get() else "disabled")
@@ -1880,7 +2415,9 @@ class EvToolApp:
             messagebox.showerror("入力エラー", "試験IDと試験項目名は必須です")
             return
         is_valid_target = self.target_hwnd is not None and (
-            self.target_hwnd == FULL_SCREEN_HWND or win32gui.IsWindow(self.target_hwnd)
+            self.target_hwnd == FULL_SCREEN_HWND
+            or is_monitor_hwnd(self.target_hwnd)
+            or win32gui.IsWindow(self.target_hwnd)
         )
         if not is_valid_target:
             messagebox.showerror("入力エラー", "対象ウィンドウを選択してください")
@@ -1917,18 +2454,27 @@ class EvToolApp:
         else:
             self._log(f'対象ウィンドウ: "{self.target_window_label}" / 自動キャプチャ: 無効（手動のみ）')
         self.status_var.set(f"取得中: {self.session.dir}")
+        self.capture_warning_var.set("")
 
         self._set_form_enabled(False)
         self.btn_start.configure(state="disabled")
         self.btn_capture.configure(state="normal")
         self.entry_shot_note.configure(state="normal")
         self.btn_finish.configure(state="normal")
+        self._enter_capture_mode()
 
     def _on_capture(self) -> None:
-        if self.session is not None:
-            note = self.var_shot_note.get().strip()
-            self.session.capture_now(tag="manual", note=note)
-            self.var_shot_note.set("")
+        if self.session is None:
+            return
+        note = self.var_shot_note.get().strip()
+        filename = self.session.capture_now(tag="manual", note=note)
+        self.var_shot_note.set("")
+        if filename:
+            self.capture_warning_var.set("")
+            img_path = self.session.shots_dir / filename
+            CapturePreviewPopup(self.root, img_path, caption=filename)
+        else:
+            self.capture_warning_var.set("警告: 直前のキャプチャに失敗しました（詳細はログ欄を確認）")
 
     def _on_finish(self) -> None:
         if self.session is None:
@@ -1936,7 +2482,7 @@ class EvToolApp:
 
         included_files = None
         if self.session.meta.shots:
-            selection_dialog = ShotSelectionDialog(self.root, self.session.meta.shots)
+            selection_dialog = ShotSelectionDialog(self.root, self.session.meta.shots, self.session.dir)
             self.root.wait_window(selection_dialog)
             if selection_dialog.cancelled:
                 return
@@ -1958,6 +2504,7 @@ class EvToolApp:
         self._log(f"エビデンスをまとめました: {session_dir}")
         self._log(f"レポート: {report_path}")
         self.status_var.set(f"完了: {session_dir}")
+        self.capture_warning_var.set("")
 
         self.session = None
         self._set_form_enabled(True)
@@ -1965,6 +2512,7 @@ class EvToolApp:
         self.btn_capture.configure(state="disabled")
         self.entry_shot_note.configure(state="disabled")
         self.btn_finish.configure(state="disabled")
+        self._exit_capture_mode()
 
         finished_test_id = self.var_test_id.get().strip()
         next_test_id = increment_test_id(finished_test_id)
