@@ -794,20 +794,27 @@ _CHECK_ROW_TEMPLATE = (
 # ============================================================================
 
 PALETTE = {
-    "bg": "#F7F8FC",
+    "bg": "#EAF3FA",
     "panel": "#FFFFFF",
-    "accent": "#C9D6FF",
-    "accent_dark": "#7C8FE0",
+    "accent": "#AED1EA",
+    "accent_dark": "#5B9BC4",
     "pink": "#F4B6C2",
     "pink_dark": "#B23A5A",
     "mint": "#B7E4C7",
     "mint_dark": "#2F7A4F",
     "text": "#3A3A4A",
     "muted": "#8A8FA3",
-    "border": "#DCE1F0",
+    "border": "#CFE3F0",
 }
 FONT_FAMILY = "Yu Gothic UI"
-FONT_SIZE = 8
+FONT_SIZE = 9
+
+# アプリアイコン・ウィンドウのタイトルバーで共通して使う配色（パステルなサックス
+# ブルー系。紫みを抑え、GUI本体のアクセント色と同じ濃いサックスブルーの線）。
+APP_ICON_TOP_COLOR = (158, 196, 224)
+APP_ICON_BOTTOM_COLOR = (200, 226, 240)
+APP_ICON_LINE_COLOR = (62, 110, 148)
+APP_ICON_TITLEBAR_TEXT_COLOR = (58, 58, 74)
 
 # 入力欄(Entry/Combobox)の幅をタブ間で揃えるための共通定数。
 ENTRY_WIDTH_TEXT = 32  # 試験ID・試験項目名・変数名・フォルダ名など、文字列を入れる欄
@@ -815,21 +822,58 @@ ENTRY_WIDTH_SHORT = 8  # 間隔(秒)など、数値だけを入れる欄
 COMBO_WIDTH_ENCODING = 10  # エンコーディング選択
 
 
+def _enable_high_dpi_support() -> None:
+    """プロセスを Per-Monitor DPI aware にする（tk.Tk() より前に呼ぶこと）.
+
+    これを呼ばないと、拡大率100%超のディスプレイでは OS がウィンドウ全体を
+    ビットマップとして引き伸ばして表示するため、文字やアイコンがぼやける。
+    """
+    try:
+        DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2 = ctypes.c_void_p(-4)
+        ok = ctypes.windll.user32.SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2)
+        if not ok:
+            raise OSError("SetProcessDpiAwarenessContext failed")
+    except (AttributeError, OSError):
+        try:
+            ctypes.windll.shcore.SetProcessDpiAwareness(2)  # PROCESS_PER_MONITOR_DPI_AWARE
+        except (AttributeError, OSError):
+            try:
+                ctypes.windll.user32.SetProcessDPIAware()
+            except (AttributeError, OSError):
+                pass
+
+
+def _set_app_user_model_id() -> None:
+    """タスクバーにこのプロセス専用のアイコンを表示させる（tk.Tk() より前に呼ぶこと）.
+
+    これを設定しないと、`py`/`python` 経由起動時にタスクバーが python.exe
+    本体と同一視し、ランタイムで設定したアイコンではなく python.exe の
+    既定アイコンを表示してしまうことがある。
+    """
+    try:
+        ctypes.windll.shell32.SetCurrentProcessExplicitAppUserModelID("evtool.EvidenceTool")
+    except (AttributeError, OSError):
+        pass
+
+
 def _build_app_icon() -> tuple[list[tk.PhotoImage], Optional[Path]]:
     """タスクバー等に表示するアプリアイコンを実行時に生成する（外部アセット不要）.
 
     戻り値は (タイトルバー用 PhotoImage のリスト, タスクバー用 .ico ファイルのパス)。
     256x256 で描いてから複数サイズに縮小することで、タスクバー/タイトルバーの
-    小さいサイズでもアンチエイリアスが効いて綺麗に見えるようにする。GUI全体の
-    パステルカラーのテーマに合わせ、ラベンダー→スカイブルーのグラデーション地に
-    しずく（雫）と星ひとつだけを置いた、装飾を抑えたゆめかわ系のモチーフにする。
+    小さいサイズでもアンチエイリアスが効いて綺麗に見えるようにする。GUI本体と同じ
+    パステルなサックスブルーのグラデーション地に、本体のアクセント色と同じ濃い
+    サックスブルーの細い輪郭線だけで描いた虫眼鏡を置く、落ち着いた印象のモチーフ
+    にする。
     """
     size = 256
     margin = 14
+    radius = 56
+    line_color = (*APP_ICON_LINE_COLOR, 255)
 
-    # 背景グラデーション（ラベンダー -> スカイブルー、縦方向）
-    top_color = (178, 173, 240)
-    bottom_color = (165, 211, 235)
+    # 背景グラデーション（GUI本体と同じパステルなサックスブルー、縦方向）
+    top_color = APP_ICON_TOP_COLOR
+    bottom_color = APP_ICON_BOTTOM_COLOR
     gradient = Image.new("RGBA", (size, size))
     pixels = gradient.load()
     for y in range(size):
@@ -842,47 +886,42 @@ def _build_app_icon() -> tuple[list[tk.PhotoImage], Optional[Path]]:
 
     mask = Image.new("L", (size, size), 0)
     mask_draw = ImageDraw.Draw(mask)
-    mask_draw.rounded_rectangle((margin, margin, size - margin, size - margin), radius=70, fill=255)
+    mask_draw.rounded_rectangle((margin, margin, size - margin, size - margin), radius=radius, fill=255)
 
     img = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     img.paste(gradient, (0, 0), mask)
-    draw = ImageDraw.Draw(img)
 
-    # 上半分に柔らかいハイライトを重ねて立体感を出す
+    # 上半分に控えめなハイライトを重ねて立体感を出す
     highlight = Image.new("RGBA", (size, size), (0, 0, 0, 0))
     hdraw = ImageDraw.Draw(highlight)
     hdraw.rounded_rectangle(
-        (margin, margin, size - margin, int(size * 0.5)), radius=70, fill=(255, 255, 255, 55)
+        (margin, margin, size - margin, int(size * 0.5)), radius=radius, fill=(255, 255, 255, 22)
     )
     img = Image.alpha_composite(img, highlight)
     draw = ImageDraw.Draw(img)
 
-    # しずく（雫）: 下側は円、上側は頂点へ向けてなめらかに収束する輪郭を多角形で近似
-    cx, cy, r = 128, 158, 46
-    apex_y = cy - r * 2.05
-    drop_points = [(cx, apex_y)]
-    n = 40
-    for i in range(n + 1):
-        t = i / n
-        angle = math.radians(40 + t * (360 - 80))
-        drop_points.append((cx + r * math.sin(angle), cy - r * math.cos(angle)))
-    draw.polygon(drop_points, fill=(255, 255, 255, 255))
+    # 縁に沿った細いアイボリーホワイトの内枠（上品さを出すフレーム）
+    draw.rounded_rectangle(
+        (margin + 10, margin + 10, size - margin - 10, size - margin - 10),
+        radius=radius - 10,
+        outline=(line_color[0], line_color[1], line_color[2], 130),
+        width=2,
+    )
 
-    # しずくの中の光の反射（左上寄りの小さい楕円ハイライト）
-    draw.ellipse((cx - 20, cy - 14, cx - 2, cy + 4), fill=(150, 160, 230, 150))
+    # 虫眼鏡: 確認・検証を行うツールであることを表すモチーフ。塗りはせず、
+    # アイボリーホワイトの輪郭線だけで描く。
+    cx, cy, r = 118, 118, 46
+    draw.ellipse((cx - r, cy - r, cx + r, cy + r), outline=line_color, width=8)
+    handle_angle = math.radians(45)
+    hx1 = cx + r * math.cos(handle_angle)
+    hy1 = cy + r * math.sin(handle_angle)
+    hx2 = hx1 + 46 * math.cos(handle_angle)
+    hy2 = hy1 + 46 * math.sin(handle_angle)
+    draw.line((hx1, hy1, hx2, hy2), fill=line_color, width=10)
 
-    # 右上に星ひとつだけ（ゆめかわ感は出すが装飾は最小限にする）
-    star_points = []
-    star_cx, star_cy, outer_pt, inner_pt = 184, 84, 14, 5
-    for i in range(8):
-        angle = math.pi / 4 * i - math.pi / 2
-        rr = outer_pt if i % 2 == 0 else inner_pt
-        star_points.append((star_cx + rr * math.cos(angle), star_cy + rr * math.sin(angle)))
-    draw.polygon(star_points, fill=(255, 255, 255, 225))
-
-    sizes = (64, 32, 16)
+    photo_sizes = (64, 48, 32, 24, 16)
     icons = []
-    for target_size in sizes:
+    for target_size in photo_sizes:
         resized = img.resize((target_size, target_size), Image.LANCZOS)
         buf = io.BytesIO()
         resized.save(buf, format="PNG")
@@ -890,11 +929,13 @@ def _build_app_icon() -> tuple[list[tk.PhotoImage], Optional[Path]]:
 
     # Windows のタスクバーボタンは iconphoto だけでは反映されず、python.exe の既定
     # アイコンが優先されることがあるため、.ico も明示的に書き出して iconbitmap で
-    # 設定する（_set_app_icon 参照）。
+    # 設定する（_set_app_icon 参照）。高DPI環境では LoadImage が要求するサイズが
+    # 32/16 とは限らないため、ぼやけずに済むよう Windows標準のサイズを広く埋め込む。
+    ico_sizes = (16, 20, 24, 32, 40, 48, 64, 96, 128, 256)
     ico_path: Optional[Path] = None
     try:
         ico_path = Path(tempfile.gettempdir()) / "evtool_app_icon.ico"
-        img.save(ico_path, format="ICO", sizes=[(s, s) for s in sizes])
+        img.save(ico_path, format="ICO", sizes=[(s, s) for s in ico_sizes])
     except OSError:
         ico_path = None
 
@@ -917,12 +958,24 @@ def _set_app_icon(root: tk.Tk) -> list[tk.PhotoImage]:
         except tk.TclError:
             pass
         try:
-            hwnd = root.winfo_id()
+            # winfo_id() が返すのは Tk が内部で持つ子ウィンドウ(フレーム)の hwnd であり、
+            # タスクバー/タイトルバーが参照する実際のトップレベルウィンドウではない。
+            # そのままだと WM_SETICON 等が無関係なウィンドウに送られ、アイコンが
+            # 一切反映されない。GetParent で実際のトップレベルの hwnd まで遡る必要がある
+            # が、tk.Tk() 直後はこのラッパー用トップレベルウィンドウがまだ生成されて
+            # おらず GetParent は 0 を返す。update_idletasks() で生成を強制してから
+            # 取得する。
+            root.update_idletasks()
+            hwnd = win32gui.GetParent(root.winfo_id()) or root.winfo_id()
+            # 32/16固定だと高DPI環境では実際に必要なサイズと食い違い、Windows側の
+            # 拡大表示でぼやけるため、実際のシステムメトリクスから要求サイズを取る。
+            big_size = win32api.GetSystemMetrics(win32con.SM_CXICON) or 32
+            small_size = win32api.GetSystemMetrics(win32con.SM_CXSMICON) or 16
             hicon_big = win32gui.LoadImage(
-                0, str(ico_path), win32con.IMAGE_ICON, 32, 32, win32con.LR_LOADFROMFILE
+                0, str(ico_path), win32con.IMAGE_ICON, big_size, big_size, win32con.LR_LOADFROMFILE
             )
             hicon_small = win32gui.LoadImage(
-                0, str(ico_path), win32con.IMAGE_ICON, 16, 16, win32con.LR_LOADFROMFILE
+                0, str(ico_path), win32con.IMAGE_ICON, small_size, small_size, win32con.LR_LOADFROMFILE
             )
             win32gui.SendMessage(hwnd, win32con.WM_SETICON, win32con.ICON_BIG, hicon_big)
             win32gui.SendMessage(hwnd, win32con.WM_SETICON, win32con.ICON_SMALL, hicon_small)
@@ -934,7 +987,33 @@ def _set_app_icon(root: tk.Tk) -> list[tk.PhotoImage]:
             ctypes.windll.user32.SetClassLongPtrW(hwnd, win32con.GCL_HICONSM, hicon_small)
         except Exception:  # noqa: BLE001 - アイコン設定に失敗しても起動自体は継続したい
             pass
+        try:
+            _set_titlebar_color(hwnd, APP_ICON_TOP_COLOR, APP_ICON_TITLEBAR_TEXT_COLOR)
+        except Exception:  # noqa: BLE001 - Windows 10等でDWM属性が使えなくても継続したい
+            pass
     return icon_images
+
+
+def _set_titlebar_color(hwnd: int, caption_rgb: tuple[int, int, int], text_rgb: tuple[int, int, int]) -> None:
+    """ウィンドウのタイトルバー自体もアイコンと同系統の配色にする（Windows 11のみ有効）.
+
+    DwmSetWindowAttribute の DWMWA_CAPTION_COLOR/DWMWA_TEXT_COLOR は
+    Windows 11 (build 22000) 以降でのみサポートされる。古い Windows では
+    呼び出しが失敗するだけで、ウィンドウの表示自体には影響しない。
+    """
+    DWMWA_CAPTION_COLOR = 35
+    DWMWA_TEXT_COLOR = 36
+    dwm_set_window_attribute = ctypes.windll.dwmapi.DwmSetWindowAttribute
+    dwm_set_window_attribute.argtypes = [ctypes.c_void_p, ctypes.c_uint, ctypes.c_void_p, ctypes.c_uint]
+    dwm_set_window_attribute.restype = ctypes.c_long
+
+    def to_colorref(rgb: tuple[int, int, int]) -> ctypes.c_int:
+        return ctypes.c_int(rgb[0] | (rgb[1] << 8) | (rgb[2] << 16))
+
+    caption_ref = to_colorref(caption_rgb)
+    dwm_set_window_attribute(hwnd, DWMWA_CAPTION_COLOR, ctypes.byref(caption_ref), ctypes.sizeof(caption_ref))
+    text_ref = to_colorref(text_rgb)
+    dwm_set_window_attribute(hwnd, DWMWA_TEXT_COLOR, ctypes.byref(text_ref), ctypes.sizeof(text_ref))
 
 
 def _apply_theme(root: tk.Tk) -> None:
@@ -959,13 +1038,13 @@ def _apply_theme(root: tk.Tk) -> None:
         bordercolor=PALETTE["border"],
         lightcolor=PALETTE["panel"],
         darkcolor=PALETTE["panel"],
-        padding=2,
+        padding=5,
     )
     style.configure(
         "TCombobox",
         fieldbackground=PALETTE["panel"],
         bordercolor=PALETTE["border"],
-        padding=2,
+        padding=5,
     )
     style.configure("TCheckbutton", background=PALETTE["bg"], foreground=PALETTE["text"])
     style.configure("TLabelframe", background=PALETTE["bg"], bordercolor=PALETTE["border"])
@@ -977,7 +1056,7 @@ def _apply_theme(root: tk.Tk) -> None:
         foreground=PALETTE["text"],
         borderwidth=0,
         focusthickness=0,
-        padding=(6, 2),
+        padding=(14, 7),
         font=default_font,
     )
     style.map("TButton", background=[("active", PALETTE["accent_dark"]), ("disabled", "#E5E7F0")])
@@ -986,10 +1065,10 @@ def _apply_theme(root: tk.Tk) -> None:
         "Primary.TButton",
         background=PALETTE["accent_dark"],
         foreground="#FFFFFF",
-        padding=(6, 2),
+        padding=(14, 7),
         font=(FONT_FAMILY, FONT_SIZE, "bold"),
     )
-    style.map("Primary.TButton", background=[("active", "#6577CC"), ("disabled", "#C7CCE8")])
+    style.map("Primary.TButton", background=[("active", "#3E7CA6"), ("disabled", "#C7D8E2")])
 
     style.configure("Capture.TButton", background=PALETTE["mint"], foreground=PALETTE["mint_dark"])
     style.map("Capture.TButton", background=[("active", "#9FD8B6"), ("disabled", "#E5E7F0")])
@@ -1013,7 +1092,7 @@ def _apply_theme(root: tk.Tk) -> None:
         "TNotebook.Tab",
         background=PALETTE["accent"],
         foreground=PALETTE["text"],
-        padding=(8, 2),
+        padding=(12, 5),
         font=default_font,
     )
     style.map(
@@ -1063,7 +1142,7 @@ class CollapsibleHelp(ttk.Frame):
         self._sync()
 
     def _sync(self) -> None:
-        self._toggle_btn.configure(text="▲" if self._open else "▼", width=2)
+        self._toggle_btn.configure(text=("使い方 ▲" if self._open else "使い方 ▼"))
         if self._open:
             self._label.pack(anchor="w", pady=(4, 0))
         else:
@@ -1118,10 +1197,12 @@ class CapturePreviewPopup(tk.Toplevel):
         self.after(auto_close_ms, self._safe_destroy)
 
     def _place_near(self, parent: tk.Misc) -> None:
+        # 親ウィンドウの内側(右下)に重ねるとキャプチャモードのような小さい
+        # ウィンドウではボタンを覆ってしまうため、親ウィンドウの外側・直下に
+        # 表示する（右端は揃える）。
         width = self.winfo_reqwidth()
-        height = self.winfo_reqheight()
-        x = parent.winfo_rootx() + parent.winfo_width() - width - 16
-        y = parent.winfo_rooty() + parent.winfo_height() - height - 16
+        x = parent.winfo_rootx() + parent.winfo_width() - width
+        y = parent.winfo_rooty() + parent.winfo_height() + 8
         x = max(0, x)
         y = max(0, y)
         self.geometry(f"+{x}+{y}")
@@ -1383,7 +1464,7 @@ class ShotSelectionDialog(tk.Toplevel):
 class FinishDialog(tk.Toplevel):
     """終了時に結果(OK/NG等)と備考を入力させるモーダルダイアログ."""
 
-    def __init__(self, parent: tk.Misc):
+    def __init__(self, parent: tk.Misc, initial_log_file: str = ""):
         super().__init__(parent)
         self.title("試験結果の入力")
         self.resizable(False, False)
@@ -1392,6 +1473,7 @@ class FinishDialog(tk.Toplevel):
 
         self.result_value: Optional[str] = None
         self.note_value: str = ""
+        self.log_file_value: str = ""
 
         frm = ttk.Frame(self, padding=12)
         frm.pack(fill="both", expand=True)
@@ -1400,7 +1482,7 @@ class FinishDialog(tk.Toplevel):
         self.var_result = tk.StringVar(value="OK")
         ttk.Combobox(
             frm, textvariable=self.var_result, values=["OK", "NG", "未実施"], width=20
-        ).grid(row=0, column=1, sticky="w", pady=(0, 6))
+        ).grid(row=0, column=1, columnspan=2, sticky="w", pady=(0, 6))
 
         ttk.Label(frm, text="備考").grid(row=1, column=0, sticky="nw")
         self.note_text = tk.Text(
@@ -1414,10 +1496,19 @@ class FinishDialog(tk.Toplevel):
             highlightbackground=PALETTE["border"],
             font=(FONT_FAMILY, FONT_SIZE),
         )
-        self.note_text.grid(row=1, column=1, sticky="we")
+        self.note_text.grid(row=1, column=1, columnspan=2, sticky="we")
+
+        # 試験開始前はまだログファイルが存在しないことが多いため、ここ（終了時）で
+        # 指定できるようにする。試験中に都度ブラウズする手間を避けるための配慮。
+        ttk.Label(frm, text="実行ログファイル\n(任意)", justify="left").grid(row=2, column=0, sticky="nw", pady=(8, 0))
+        self.var_log_file = tk.StringVar(value=initial_log_file)
+        ttk.Entry(frm, textvariable=self.var_log_file, width=32).grid(
+            row=2, column=1, sticky="we", padx=(0, 6), pady=(8, 0)
+        )
+        ttk.Button(frm, text="参照...", command=self._browse_log_file).grid(row=2, column=2, pady=(8, 0))
 
         btns = ttk.Frame(frm)
-        btns.grid(row=2, column=0, columnspan=2, pady=(10, 0), sticky="e")
+        btns.grid(row=3, column=0, columnspan=3, pady=(10, 0), sticky="e")
         ttk.Button(btns, text="キャンセル", command=self._on_cancel).pack(side="right", padx=(6, 0))
         ttk.Button(btns, text="OK", style="Primary.TButton", command=self._on_ok).pack(side="right")
 
@@ -1426,9 +1517,15 @@ class FinishDialog(tk.Toplevel):
         self.grab_set()
         self.note_text.focus_set()
 
+    def _browse_log_file(self) -> None:
+        path = filedialog.askopenfilename(title="実行ログファイルを選択", parent=self)
+        if path:
+            self.var_log_file.set(path)
+
     def _on_ok(self) -> None:
         self.result_value = self.var_result.get().strip()
         self.note_value = self.note_text.get("1.0", "end").strip()
+        self.log_file_value = self.var_log_file.get().strip()
         self.destroy()
 
     def _on_cancel(self) -> None:
@@ -1484,11 +1581,9 @@ class SourceCheckFrame(ttk.Frame):
         # reqwidth分のスペースを占有し、ボタンが見切れるため。
         button_col = ttk.Frame(bulk_row)
         button_col.pack(side="right", padx=(6, 0), anchor="n")
-        ttk.Button(button_col, text="② 項目を追加", style="Primary.TButton", command=self._add_bulk_items).pack(
-            fill="x"
-        )
+        ttk.Button(button_col, text="② 項目を追加", style="Primary.TButton", command=self._add_bulk_items).pack()
         btn_csv = ttk.Button(button_col, text="CSVから読み込み", command=self._load_csv)
-        btn_csv.pack(fill="x", pady=(4, 0))
+        btn_csv.pack(pady=(4, 0))
         self.bulk_text = tk.Text(
             bulk_row,
             height=4,
@@ -1886,9 +1981,9 @@ class InstrumentFrame(ttk.Frame):
         self.names_text.pack(side="left", padx=6, fill="x", expand=True)
         btn_col = ttk.Frame(search_frame)
         btn_col.pack(side="left", anchor="n")
-        ttk.Button(btn_col, text="候補を検索", style="Capture.TButton", command=self._search).pack(fill="x")
+        ttk.Button(btn_col, text="候補を検索", style="Capture.TButton", command=self._search).pack()
         btn_csv = ttk.Button(btn_col, text="CSVから読込", command=self._load_csv)
-        btn_csv.pack(fill="x", pady=(4, 0))
+        btn_csv.pack(pady=(4, 0))
 
         columns = ("var", "line", "content")
         tree_frame = ttk.Frame(self)
@@ -2107,8 +2202,6 @@ class EvToolApp:
     def __init__(self, root: tk.Tk):
         self.root = root
         self.root.title("evtool")
-        self.root.geometry("560x460")
-        self.root.minsize(480, 380)
         _apply_theme(self.root)
 
         self._icon_images = _set_app_icon(self.root)
@@ -2123,8 +2216,21 @@ class EvToolApp:
         self._normal_geometry: str = ""
 
         self._build_widgets()
+        self._set_default_target_window()
         self.root.protocol("WM_DELETE_WINDOW", self._on_close)
         self.root.after(150, self._poll_log_queue)
+
+        # ウィンドウサイズは固定値(560x460等)で固定しない。固定値だとモニターのDPIに
+        # よって実際に必要な幅・高さと食い違い、下端や右端のボタンが画面外に隠れて
+        # 押せなくなることがある（マルチモニタ環境ではモニター毎にDPIが異なるため、
+        # 起動時に一度だけ計算した固定値はその後別のDPIで開いた場合に食い違う）。
+        # 実際に組んだウィジェット一式が必要とする最小限のサイズ（＝最もコンパクトな
+        # サイズ）を都度計算して使う。タブ切替で毎回サイズが変わると操作感が落ち着か
+        # ないため、ウィンドウサイズはタブに関わらず一定にする。
+        self.root.update_idletasks()
+        self._default_minsize = (self.root.winfo_reqwidth(), self.root.winfo_reqheight())
+        self.root.geometry(f"{self._default_minsize[0]}x{self._default_minsize[1]}")
+        self.root.minsize(*self._default_minsize)
 
     # ---- widgets ---------------------------------------------------------
     def _build_widgets(self) -> None:
@@ -2168,7 +2274,7 @@ class EvToolApp:
 
         ttk.Button(
             frame, text="今すぐキャプチャ", style="Capture.TButton", command=self._on_capture
-        ).pack(fill="x")
+        ).pack()
 
         note_row = ttk.Frame(frame)
         note_row.pack(fill="x", pady=(6, 0))
@@ -2178,7 +2284,7 @@ class EvToolApp:
         )
 
         ttk.Button(frame, text="停止して終了", style="Finish.TButton", command=self._on_finish).pack(
-            fill="x", pady=(10, 0)
+            pady=(10, 0)
         )
 
         ttk.Label(
@@ -2199,8 +2305,14 @@ class EvToolApp:
             f"{self.var_test_id.get()} - {self.var_title.get()}\n対象: {self.target_window_label}"
         )
         self.capture_mode_frame.pack(fill="both", expand=True)
-        self.root.minsize(260, 170)
-        self.root.geometry("300x190")
+        # 固定値だとモニターのDPIによってボタンがあふれるため、明示的なサイズ
+        # 指定を解除してから、コンパクトモードの内容に必要な最小サイズを計算
+        # して使う（通常表示時と同じ考え方）。
+        self.root.geometry("")
+        self.root.update_idletasks()
+        width, height = self.root.winfo_reqwidth(), self.root.winfo_reqheight()
+        self.root.geometry(f"{width}x{height}")
+        self.root.minsize(width, height)
         self.root.attributes("-topmost", True)
 
     def _exit_capture_mode(self) -> None:
@@ -2208,7 +2320,7 @@ class EvToolApp:
         self.root.attributes("-topmost", False)
         self.title_label.pack(anchor="w")
         self.notebook.pack(fill="both", expand=True, padx=8, pady=(0, 8))
-        self.root.minsize(480, 380)
+        self.root.minsize(*self._default_minsize)
         if self._normal_geometry:
             self.root.geometry(self._normal_geometry)
 
@@ -2220,7 +2332,8 @@ class EvToolApp:
             "・対象ウィンドウは選択後にタイトルが変わっても追跡を継続。「画面全体」で全モニター、\n"
             "  「モニターN」で1台だけを取得できます（複数モニター使用時に選択肢に表示）。\n"
             "・自動キャプチャは既定OFF（手動のみ）。チェックすると指定間隔でも自動取得します。\n"
-            "・実行ログファイル(任意)は終了時にコピーされ、レポートに添付されます。",
+            "・実行ログファイル(任意)は「終了してまとめる」時に指定します（試験開始前はまだ\n"
+            "  ログファイルが存在しないことが多いため）。指定するとコピーされ、レポートに添付されます。",
         )
         help_widget.pack(fill="x", padx=10, pady=(6, 0))
 
@@ -2234,7 +2347,6 @@ class EvToolApp:
         self.var_auto_capture = tk.BooleanVar(value=False)
         self.var_interval = tk.StringVar(value="10")
         self.var_output = tk.StringVar(value="evidence")
-        self.var_log_file = tk.StringVar()
         self.var_shot_note = tk.StringVar()
 
         def add_row(row: int, label: str, var: tk.StringVar, browse=None, width=ENTRY_WIDTH_TEXT):
@@ -2251,7 +2363,7 @@ class EvToolApp:
         self.combo_test_id.grid(row=0, column=1, sticky="we", padx=(6, 6), pady=4)
         self._entries.append(self.combo_test_id)
 
-        ttk.Label(form, text="試験項目名 *").grid(row=1, column=0, sticky="w", pady=4)
+        ttk.Label(form, text="試験項目名").grid(row=1, column=0, sticky="w", pady=4)
         self.combo_title = ttk.Combobox(form, textvariable=self.var_title, width=ENTRY_WIDTH_TEXT)
         self.combo_title.grid(row=1, column=1, sticky="we", padx=(6, 6), pady=4)
         self._entries.append(self.combo_title)
@@ -2279,7 +2391,6 @@ class EvToolApp:
         self._entries.append(self.entry_interval)
 
         add_row(4, "出力先フォルダ", self.var_output, browse=self._browse_output)
-        add_row(5, "実行ログファイル(任意)", self.var_log_file, browse=self._browse_log_file)
 
         btn_frame = ttk.Frame(parent, padding=(10, 0, 10, 8))
         btn_frame.pack(fill="x")
@@ -2317,10 +2428,15 @@ class EvToolApp:
         )
         self.capture_warning_label.pack(fill="x")
 
-        log_frame = ttk.Frame(parent, padding=(10, 0, 10, 10))
-        log_frame.pack(fill="both", expand=True)
+        # ログ欄は常時表示すると画面を占有するため既定では閉じておき、必要な時だけ
+        # ボタンで開閉できるようにする（上のステータス欄で簡易な状況は分かる）。
+        self._log_visible = False
+        self.log_toggle_btn = ttk.Button(parent, text="ログを表示 ▼", command=self._toggle_log_panel)
+        self.log_toggle_btn.pack(anchor="w", padx=10, pady=(0, 4))
+
+        self.log_frame = ttk.Frame(parent, padding=(10, 0, 10, 10))
         self.log_text = tk.Text(
-            log_frame,
+            self.log_frame,
             height=6,
             state="disabled",
             wrap="word",
@@ -2331,20 +2447,44 @@ class EvToolApp:
             highlightbackground=PALETTE["border"],
             font=(FONT_FAMILY, FONT_SIZE),
         )
-        scrollbar = ttk.Scrollbar(log_frame, command=self.log_text.yview)
+        scrollbar = ttk.Scrollbar(self.log_frame, command=self.log_text.yview)
         self.log_text.configure(yscrollcommand=scrollbar.set)
         self.log_text.pack(side="left", fill="both", expand=True)
         scrollbar.pack(side="right", fill="y")
+
+    def _toggle_log_panel(self) -> None:
+        self._log_visible = not self._log_visible
+        if self._log_visible:
+            self.log_frame.pack(fill="both", expand=True)
+            self.log_toggle_btn.configure(text="ログを隠す ▲")
+        else:
+            self.log_frame.pack_forget()
+            self.log_toggle_btn.configure(text="ログを表示 ▼")
 
     def _browse_output(self) -> None:
         path = filedialog.askdirectory(title="エビデンス出力先フォルダを選択")
         if path:
             self.var_output.set(path)
 
-    def _browse_log_file(self) -> None:
-        path = filedialog.askopenfilename(title="実行ログファイルを選択")
-        if path:
-            self.var_log_file.set(path)
+    def _set_default_target_window(self) -> None:
+        """起動時点では対象未選択のままにせず、メイン画面（プライマリモニター）を
+        既定の対象にしておく。モニター1台のみの環境では「画面全体」と等価なので
+        そちらを既定にする。「選択...」で後から変更できる。
+        """
+        monitors = list_monitors()
+        if len(monitors) <= 1:
+            self.target_hwnd = FULL_SCREEN_HWND
+            self.target_window_label = "画面全体（すべてのモニター）"
+        else:
+            primary_index = 0
+            for i, (left, top, _right, _bottom) in enumerate(monitors):
+                if left == 0 and top == 0:
+                    primary_index = i
+                    break
+            rect = monitors[primary_index]
+            self.target_hwnd = monitor_hwnd(primary_index)
+            self.target_window_label = f"モニター{primary_index + 1}（{rect[2] - rect[0]}x{rect[3] - rect[1]}）"
+        self.var_window_display.set(self.target_window_label)
 
     def _on_pick_window(self) -> None:
         dialog = WindowPickerDialog(self.root)
@@ -2411,8 +2551,8 @@ class EvToolApp:
     def _on_start(self) -> None:
         test_id = self.var_test_id.get().strip()
         title = self.var_title.get().strip()
-        if not test_id or not title:
-            messagebox.showerror("入力エラー", "試験IDと試験項目名は必須です")
+        if not test_id:
+            messagebox.showerror("入力エラー", "試験IDは必須です")
             return
         is_valid_target = self.target_hwnd is not None and (
             self.target_hwnd == FULL_SCREEN_HWND
@@ -2493,7 +2633,7 @@ class EvToolApp:
         if dialog.result_value is None:
             return
 
-        log_file = self.var_log_file.get().strip() or None
+        log_file = dialog.log_file_value or None
         session_dir = self.session.finish(
             result=dialog.result_value,
             note=dialog.note_value,
@@ -2533,6 +2673,8 @@ class EvToolApp:
 
 
 def main() -> int:
+    _enable_high_dpi_support()
+    _set_app_user_model_id()
     root = tk.Tk()
     EvToolApp(root)
     root.mainloop()
