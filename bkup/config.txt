@@ -1,3 +1,0 @@
-HOST_IP=10.0.0.18
-USER_NAME=nanahira
-PASS_WORD=nanahira

@@ -1,1 +1,0 @@
-sudo rsync -av --include="*/" --exclude="*" /mnt/data/ /mnt/bkup/

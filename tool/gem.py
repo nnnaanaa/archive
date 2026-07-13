@@ -186,6 +186,20 @@ THEMES: dict[str, dict] = {
         "tab_act": "#0C140C", "tab_inact": "#080F08",
         "btn_del": "#A03838", "btn_del_h": "#CC4848",
     },
+    "yumekawa": {   # dreamy pastel pink-purple
+        "bg": "#FDF0FA", "card": "#FFF8FE", "card_h": "#F3E0FF",
+        "accent": "#C86BD8", "accent_dk": "#A24CC0", "accent_lt": "#EBB8F5",
+        "text": "#4A2258", "text_sub": "#A070B8", "border": "#F0C8E8",
+        "tab_act": "#FFF8FE", "tab_inact": "#F8E4F4",
+        "btn_del": "#E888A8", "btn_del_h": "#C86088",
+    },
+    "coffee": {   # warm dark roast + caramel
+        "bg": "#241B15", "card": "#2F251E", "card_h": "#3B2E25",
+        "accent": "#C08A5A", "accent_dk": "#9A6A3E", "accent_lt": "#D8AE82",
+        "text": "#F2E8DC", "text_sub": "#B09880", "border": "#4A3A2C",
+        "tab_act": "#2F251E", "tab_inact": "#281F18",
+        "btn_del": "#8B4A3A", "btn_del_h": "#B05E48",
+    },
 }
 
 ICON_PALETTES: dict[str, dict] = {
@@ -297,6 +311,18 @@ ICON_PALETTES: dict[str, dict] = {
         "MD":  ( 24, 153,  64, 255), "DK": ( 12,  90,  40, 255),
         "SP":  (160, 245, 190, 200),
     },
+    "yumekawa": {
+        "BDR": ( 95,  40, 105, 255), "HL": (250, 215, 250, 255),
+        "LT":  (240, 180, 245, 255), "F":  (200, 120, 220, 255),
+        "MD":  (160,  85, 180, 255), "DK": (110,  50, 130, 255),
+        "SP":  (250, 210, 250, 210),
+    },
+    "coffee": {
+        "BDR": ( 55,  35,  15, 255), "HL": (235, 205, 170, 255),
+        "LT":  (215, 170, 125, 255), "F":  (192, 138,  90, 255),
+        "MD":  (154, 106,  62, 255), "DK": ( 95,  60,  30, 255),
+        "SP":  (238, 210, 175, 205),
+    },
 }
 
 # ── Font hierarchy ───────────────────────────────────────
@@ -375,6 +401,31 @@ def _fuzzy_score(query: str, text: str) -> int | None:
     return total
 
 
+def _match_positions(label: str, query: str) -> set[int]:
+    """Character indices of label that the query hits (for palette highlight).
+
+    Mirrors _fuzzy_score: per word, prefer a substring hit, else the in-order
+    subsequence. Words that only match outside the label mark nothing.
+    """
+    pos: set[int] = set()
+    lab = label.lower()
+    for word in query.lower().split():
+        i = lab.find(word)
+        if i >= 0:
+            pos.update(range(i, i + len(word)))
+            continue
+        p, hits = 0, []
+        for ch in word:
+            p = lab.find(ch, p)
+            if p < 0:
+                hits = []
+                break
+            hits.append(p)
+            p += 1
+        pos.update(hits)
+    return pos
+
+
 def _log_task_progress(task: dict, new_pct: int, created: bool = False):
     """Record a day-level progress change on the task.
 
@@ -408,6 +459,91 @@ def _draw_rounded_rect(canvas, x1, y1, x2, y2, r, **kw):
                           start=start, extent=90, style="pieslice", **kw)
     canvas.create_rectangle(x1+r, y1, x2-r, y2, **kw)
     canvas.create_rectangle(x1, y1+r, x2, y2-r, **kw)
+
+
+_APP_EXTS = (".exe", ".bat", ".cmd", ".lnk", ".msi", ".ps1")
+
+
+def _item_kind(path: str, item_type: str = "folder") -> str:
+    """Classify a launcher entry as folder / app / file / web (no disk I/O)."""
+    p = (path or "").strip().lower()
+    if p.startswith(("http://", "https://")):
+        return "web"
+    if item_type != "file":
+        return "folder"
+    return "app" if os.path.splitext(p)[1] in _APP_EXTS else "file"
+
+
+def _make_type_glyph(parent, kind: str, bg: str) -> tk.Canvas:
+    """Tiny canvas pictogram for an item's type; theme-colored, emoji-free."""
+    cv = tk.Canvas(parent, width=18, height=16, bg=bg, highlightthickness=0)
+    a = C["accent"]
+    if kind == "web":
+        cv.create_oval(3, 2, 15, 14, outline=a, width=1)
+        cv.create_line(3, 8, 16, 8, fill=a)
+        cv.create_arc(6, 2, 12, 14, start=90, extent=180, style="arc", outline=a)
+        cv.create_arc(6, 2, 12, 14, start=270, extent=180, style="arc", outline=a)
+    elif kind == "app":
+        cv.create_polygon(5, 3, 14, 8, 5, 13, fill=a, outline="")
+    elif kind == "file":
+        cv.create_polygon(5, 2, 10, 2, 13, 5, 13, 14, 5, 14,
+                          fill="", outline=a)
+        cv.create_line(10, 2, 10, 5, 13, 5, fill=a)
+    else:   # folder
+        cv.create_rectangle(3, 3, 9, 7, fill=a, outline="")
+        _draw_rounded_rect(cv, 3, 5, 15, 14, 2, fill=a)
+    return cv
+
+
+def _draw_weather_icon(cv: tk.Canvas, kind: str, k: float = 1.0):
+    """Redraw the header weather pictogram (no emoji fonts involved).
+
+    Drawn in a 20x18 design space, then scaled by k to the canvas size.
+    """
+    SUN, CLOUD, RAIN = "#FFE082", "#F2F2F8", "#B3D9FF"
+
+    def cloud(dy=0):
+        cv.create_oval(3, 6 + dy, 11, 13 + dy, fill=CLOUD, outline="")
+        cv.create_oval(7, 3 + dy, 15, 11 + dy, fill=CLOUD, outline="")
+        cv.create_oval(10, 6 + dy, 17, 13 + dy, fill=CLOUD, outline="")
+
+    cv.delete("all")
+    if kind == "sun":
+        cv.create_oval(5, 4, 15, 14, fill=SUN, outline="")
+        for i in range(8):
+            a = i * math.pi / 4
+            cv.create_line(10 + 6 * math.cos(a), 9 + 6 * math.sin(a),
+                           10 + 8 * math.cos(a), 9 + 8 * math.sin(a), fill=SUN)
+    elif kind == "partly":
+        cv.create_oval(3, 2, 11, 10, fill=SUN, outline="")
+        cloud(3)
+    elif kind == "rain":
+        cloud(-1)
+        for x in (6, 10, 14):
+            cv.create_line(x, 11, x - 2, 16, fill=RAIN, width=2)
+    elif kind == "snow":
+        cloud(-1)
+        for x in (6, 10, 14):
+            cv.create_oval(x - 1, 12, x + 2, 15, fill="white", outline="")
+    elif kind == "thunder":
+        cloud(-1)
+        cv.create_polygon(11, 9, 7, 13, 10, 13, 8, 17, 13, 12, 10, 12,
+                          fill=SUN, outline="")
+    else:   # cloud / fog
+        cloud(1)
+    if k != 1.0:
+        cv.scale("all", 0, 0, k, k)
+
+
+def _render_empty_state(parent, title: str, hint: str):
+    """Friendly placeholder for an empty list: title + hint."""
+    box = tk.Frame(parent, bg=C["bg"])
+    box.pack(expand=True, pady=36)
+    tk.Label(box, text=title, bg=C["bg"], fg=C["text"],
+             font=FONT_BOLD).pack(pady=(0, 3))
+    tk.Label(box, text=hint, bg=C["bg"], fg=C["text_sub"],
+             font=FONT_SMALL, justify="center").pack()
+    return box
 
 
 def _autohide_scrollbar(sb, lo, hi, pack_kw):
@@ -737,6 +873,68 @@ def _mask_cloud(md, S):
                          radius=int(S * 0.14), fill=255)
 
 
+def _mask_gem(md, S):
+    # classic faceted-gem silhouette: flat table, angled crown, pointed pavilion
+    md.polygon([(S * 0.30, S * 0.14), (S * 0.70, S * 0.14),
+                (S * 0.92, S * 0.42), (S * 0.50, S * 0.93),
+                (S * 0.08, S * 0.42)], fill=255)
+
+
+def _mask_flower(md, S):
+    import math
+    c, pr, dist = S / 2, S * 0.21, S * 0.27
+    for i in range(5):
+        a = -math.pi / 2 + i * 2 * math.pi / 5
+        px, py = c + dist * math.cos(a), c + dist * math.sin(a)
+        md.ellipse([px - pr, py - pr, px + pr, py + pr], fill=255)
+    cr = S * 0.20
+    md.ellipse([c - cr, c - cr, c + cr, c + cr], fill=255)
+
+
+def _mask_paw(md, S):
+    # main pad
+    md.ellipse([S * 0.24, S * 0.42, S * 0.76, S * 0.92], fill=255)
+    # four toes
+    tr = S * 0.105
+    for tx, ty in [(0.17, 0.40), (0.375, 0.22), (0.625, 0.22), (0.83, 0.40)]:
+        md.ellipse([S * tx - tr, S * ty - tr, S * tx + tr, S * ty + tr], fill=255)
+
+
+def _mask_bolt(md, S):
+    md.polygon([(S * 0.56, S * 0.06), (S * 0.22, S * 0.56), (S * 0.44, S * 0.56),
+                (S * 0.38, S * 0.94), (S * 0.78, S * 0.40), (S * 0.54, S * 0.40),
+                (S * 0.64, S * 0.06)], fill=255)
+
+
+def _mask_ribbon(md, S):
+    # bow: two side loops + center knot
+    md.polygon([(S * 0.06, S * 0.20), (S * 0.06, S * 0.80), (S * 0.47, S * 0.55),
+                (S * 0.47, S * 0.45)], fill=255)
+    md.polygon([(S * 0.94, S * 0.20), (S * 0.94, S * 0.80), (S * 0.53, S * 0.55),
+                (S * 0.53, S * 0.45)], fill=255)
+    md.rounded_rectangle([S * 0.38, S * 0.34, S * 0.62, S * 0.66],
+                         radius=int(S * 0.08), fill=255)
+
+
+def _mask_snowflake(md, S):
+    import math
+    c, R = S / 2, S * 0.46
+    w_main, w_br = int(S * 0.13), int(S * 0.10)
+    for i in range(6):
+        a = -math.pi / 2 + i * math.pi / 3
+        dx, dy = math.cos(a), math.sin(a)
+        tipx, tipy = c + R * dx, c + R * dy
+        md.line([(c, c), (tipx, tipy)], fill=255, width=w_main)
+        tr = S * 0.065
+        md.ellipse([tipx - tr, tipy - tr, tipx + tr, tipy + tr], fill=255)
+        # short side branches partway along each arm
+        bx, by = c + R * 0.60 * dx, c + R * 0.60 * dy
+        for da in (math.pi / 3, -math.pi / 3):
+            ex = bx + R * 0.30 * math.cos(a + da)
+            ey = by + R * 0.30 * math.sin(a + da)
+            md.line([(bx, by), (ex, ey)], fill=255, width=w_br)
+
+
 _ICON_MASKS = {
     "rounded": _mask_rounded,
     "ring":    _mask_ring,
@@ -747,6 +945,12 @@ _ICON_MASKS = {
     "star":    _mask_star,
     "moon":    _mask_moon,
     "cloud":   _mask_cloud,
+    "gem":       _mask_gem,
+    "flower":    _mask_flower,
+    "paw":       _mask_paw,
+    "bolt":      _mask_bolt,
+    "ribbon":    _mask_ribbon,
+    "snowflake": _mask_snowflake,
 }
 
 # Selectable icon designs (key, label) shown in the settings menu.
@@ -761,6 +965,12 @@ ICON_SHAPES = [
     ("star",    "Star"),
     ("moon",    "Moon"),
     ("cloud",   "Cloud"),
+    ("gem",       "Gem"),
+    ("flower",    "Flower"),
+    ("paw",       "Paw"),
+    ("bolt",      "Bolt"),
+    ("ribbon",    "Ribbon"),
+    ("snowflake", "Snowflake"),
 ]
 
 
@@ -893,8 +1103,11 @@ def _setup_taskbar_icon(root: tk.Tk, palette: dict | None = None,
         root.after(200, _apply)
 
 
-def _apply_titlebar_theme(win) -> None:
+def _apply_titlebar_theme(win, focused: bool = True) -> None:
     """Color the native title bar / window border to match the theme.
+
+    The border doubles as a focus indicator: bright accent while the window
+    has focus, muted theme border color while it doesn't.
 
     Uses DWM attributes available on Windows 11 (caption color 35, caption
     text color 36, border color 34); silently no-ops on older Windows and
@@ -914,9 +1127,10 @@ def _apply_titlebar_theme(win) -> None:
         dwm = ctypes.windll.dwmapi
         dwm.DwmSetWindowAttribute.argtypes = [
             wintypes.HWND, wintypes.DWORD, ctypes.c_void_p, wintypes.DWORD]
-        for attr, val in ((35, cref(C["accent"])),       # DWMWA_CAPTION_COLOR
-                          (36, cref("#FFFFFF")),         # DWMWA_TEXT_COLOR
-                          (34, cref(C["accent_dk"]))):   # DWMWA_BORDER_COLOR
+        border = C["accent"] if focused else C["border"]
+        for attr, val in ((35, cref(C["accent"])),   # DWMWA_CAPTION_COLOR
+                          (36, cref("#FFFFFF")),     # DWMWA_TEXT_COLOR
+                          (34, cref(border))):       # DWMWA_BORDER_COLOR
             v = wintypes.DWORD(val)
             dwm.DwmSetWindowAttribute(hwnd, attr, ctypes.byref(v),
                                       ctypes.sizeof(v))
@@ -3549,9 +3763,6 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._hud_cpu: deque = deque(maxlen=60)   # last 60s of CPU samples (%)
         self._hud_ram: deque = deque(maxlen=60)   # last 60s of RAM load (%)
         self._hud_ram_gb: tuple[float, float] | None = None  # (used GB, total GB)
-        self._hud_tip: tk.Toplevel | None = None  # hover tooltip (stats readout)
-        self._hud_tip_lbl: tk.Label | None = None
-        self._hud_tip_after = None  # delayed-show timer (avoid popup on pass-over)
         self._save_after_id = None             # after ID for debounced config save
         self._card_frames: list = []           # rendered cards (drag-reorder)
         self._card_drag: dict | None = None    # in-progress card drag state
@@ -3604,7 +3815,15 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._setup_win_integration()
         # deferred: the WM frame window exists only after mapping
         self.after(50, lambda: _apply_titlebar_theme(self))
+        # border doubles as focus indicator (bright accent <-> muted)
+        self.bind("<FocusIn>",  lambda e: _apply_titlebar_theme(self, True)
+                  if e.widget is self else None, add="+")
+        self.bind("<FocusOut>", lambda e: _apply_titlebar_theme(self, False)
+                  if e.widget is self else None, add="+")
         self._pulse_loop()   # ping-dot glow animation (independent of _tick)
+        self._break_last = time.monotonic()
+        self._break_tick_start()   # break reminder heartbeat (only while enabled)
+        self._weather_start()
 
     # ── Config read/write (unified in config.json) ─────────────────
 
@@ -3651,6 +3870,10 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 self._log_keep_days = 30
                 self._hud_enabled = True
                 self._hud_show_text = True
+                self._min_to_tray_cfg = True
+                self._break_min = 0
+                self._weather_city = ""
+                self._palette_freq = {}
                 C.update(THEMES.get(self._theme, THEMES["plush"]))
                 return
             migrated = True  # migration successful
@@ -3716,6 +3939,25 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         # header HUD (CPU/MEM readout) visibility / numeric readout
         self._hud_enabled = bool(cfg.get("hud_enabled", True))
         self._hud_show_text = bool(cfg.get("hud_show_text", True))
+
+        # minimize (_) sends the window to the tray; off = stay in taskbar
+        self._min_to_tray_cfg = bool(cfg.get("minimize_to_tray", True))
+
+        # break reminder interval in minutes (0 = off)
+        try:
+            self._break_min = max(0, int(cfg.get("break_reminder_min", 0)))
+        except (TypeError, ValueError):
+            self._break_min = 0
+
+        # weather in the header: city name ("" = off)
+        self._weather_city = str(cfg.get("weather_city", "") or "")
+
+        # command palette: use counts for most-used-first ordering
+        try:
+            self._palette_freq = {str(k): int(v)
+                                  for k, v in dict(cfg.get("palette_freq", {})).items()}
+        except (TypeError, ValueError):
+            self._palette_freq = {}
 
         # tab pin settings
         self._pinned_tabs = cfg.get("pinned_tabs", list(self._DEFAULT_PINS))
@@ -3802,6 +4044,13 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             "conn_ping_enabled": self._conn_ping_enabled,
             "hud_enabled":     getattr(self, "_hud_enabled", True),
             "hud_show_text":   getattr(self, "_hud_show_text", True),
+            "minimize_to_tray": getattr(self, "_min_to_tray_cfg", True),
+            "break_reminder_min": getattr(self, "_break_min", 0),
+            "weather_city":    getattr(self, "_weather_city", ""),
+            # keep only the 200 most-used entries so the file stays small
+            "palette_freq":    dict(sorted(
+                getattr(self, "_palette_freq", {}).items(),
+                key=lambda kv: -kv[1])[:200]),
             "topmost":         self.attributes("-topmost"),
             "alpha":           self.attributes("-alpha"),
             "card_size":       self._card_size,
@@ -3971,6 +4220,20 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             except Exception:
                 pass
 
+        # Refit the tab bar on any width change (debounced): the pill count
+        # is width-based, so same-breakpoint changes need a re-render too
+        try:
+            w = self.winfo_width()
+            if w != getattr(self, "_tab_fit_w", None):
+                self._tab_fit_w = w
+                if getattr(self, "_tab_fit_after", None) is not None:
+                    self.after_cancel(self._tab_fit_after)
+                self._tab_fit_after = self.after(
+                    150, lambda: (setattr(self, "_tab_fit_after", None),
+                                  self._render_tabs()))
+        except Exception:
+            pass
+
         # Re-render only when the breakpoint changes
         bp = self._width_bp()
         if bp == self._prev_bp:
@@ -3997,13 +4260,23 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         tk.Label(_clk, textvariable=self._clock_var,
                  bg=C["accent"], fg="white",
                  font=FONT_MONO, anchor="w").pack(fill="x")
-        tk.Label(_clk, textvariable=self._date_var,
+        _clk_row2 = tk.Frame(_clk, bg=C["accent"])
+        _clk_row2.pack(fill="x")
+        tk.Label(_clk_row2, textvariable=self._date_var,
                  bg=C["accent"], fg=C["accent_lt"],
                  font=(FONT_MONO[0], max(7, FONT_BASE - 3)),
-                 anchor="w").pack(fill="x")
+                 anchor="w").pack(side="left")
+        # weather tucked next to the date (drawn icon + temp; hidden when off)
+        self._weather_var = tk.StringVar(value="")
+        self._weather_cv = tk.Canvas(_clk_row2, width=15, height=13,
+                                     bg=C["accent"], highlightthickness=0)
+        self._weather_lbl = tk.Label(_clk_row2, textvariable=self._weather_var,
+                                     bg=C["accent"], fg="white",
+                                     font=(FONT_MONO[0], max(7, FONT_BASE - 3)))
+        self._weather_apply(getattr(self, "_weather_state", None))
 
         # HUD: CPU/RAM sparkline + readout (fed by _tick)
-        self._hud_cv = tk.Canvas(hdr, width=56, height=24,
+        self._hud_cv = tk.Canvas(hdr, width=44, height=24,
                                  bg=C["accent"], highlightthickness=0)
         self._hud_cv.pack(side="left", padx=(8, 0))
         self._hud_lbl = tk.Label(hdr, text="", justify="left", anchor="w",
@@ -4011,9 +4284,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                                  font=(FONT_MONO[0], max(7, FONT_BASE - 3)))
         self._hud_lbl.pack(side="left", padx=(3, 0))
         for _w in (self._hud_cv, self._hud_lbl):
-            _w.bind("<Enter>",    self._hud_tip_schedule)
-            _w.bind("<Leave>",    self._hud_tip_hide)
             _w.bind("<Button-3>", self._hud_context_menu)
+
 
         # Banner notification label
         self._banner_lbl = tk.Label(
@@ -4029,6 +4301,11 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._apply_hud_visibility()
         self._banner_enabled = tk.BooleanVar(value=self._banner_enabled_cfg)
         self._banner_enabled.trace_add("write", lambda *_: (self._update_banner(), self._save_config()))
+        self._min_to_tray = tk.BooleanVar(value=self._min_to_tray_cfg)
+        self._min_to_tray.trace_add(
+            "write",
+            lambda *_: (setattr(self, "_min_to_tray_cfg", self._min_to_tray.get()),
+                        self._save_config()))
         self._notify_display_sec = tk.IntVar(value=self._notify_display_sec_cfg)
         self._notify_display_sec.trace_add("write", lambda *_: self._save_config())
         self.attributes("-topmost", self._topmost_cfg)
@@ -4058,8 +4335,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                                 ("gemini","Gemini"),("claude","Claude"),("scarlet","Scarlet"),
                                 ("ocean","Ocean"),("rose","Rose"),("mint","Mint"),
                                 ("peach","Peach"),("sky","Sky"),("lemon","Lemon"),
-                                ("lavender","Lavender"),("sakura","Sakura"),
-                                ("cyber","Cyber"),("synthwave","Synthwave"),("matrix","Matrix")]:
+                                ("lavender","Lavender"),("sakura","Sakura"),("yumekawa","Yumekawa"),
+                                ("cyber","Cyber"),("synthwave","Synthwave"),("matrix","Matrix"),
+                                ("coffee","Coffee")]:
                 prefix = "* " if self._theme == key else "  "
                 theme_sub.add_command(label=prefix + label,
                                       command=lambda k=key: self._apply_theme(k))
@@ -4088,6 +4366,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             m.add_cascade(label="Export language", menu=exp_sub)
             m.add_separator()
 
+            m.add_command(label="Command palette    Ctrl+K",
+                          command=self._open_command_palette)
+
             # Banner toggle
             m.add_checkbutton(label="Banner notifications",
                               variable=self._banner_enabled,
@@ -4096,6 +4377,11 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             # CPU/MEM HUD toggle
             m.add_checkbutton(label="CPU/MEM monitor",
                               variable=self._hud_enabled_var,
+                              onvalue=True, offvalue=False)
+
+            # Minimize-to-tray toggle (off = minimize stays in taskbar)
+            m.add_checkbutton(label="Minimize to tray",
+                              variable=self._min_to_tray,
                               onvalue=True, offvalue=False)
 
             # Notify duration
@@ -4110,6 +4396,31 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                         pass
             m.add_command(label=f"Notify duration: {self._notify_display_sec.get()} s",
                           command=_edit_notify_sec)
+
+            # Break reminder interval
+            brk_sub = tk.Menu(m, tearoff=0,
+                              bg=C["card"], fg=C["text"],
+                              activebackground=C["card_h"], activeforeground=C["text"],
+                              relief="flat", font=FONT_SMALL)
+            for v in (0, 30, 45, 60, 90):
+                prefix = "* " if self._break_min == v else "  "
+                label = "Off" if v == 0 else f"Every {v} min"
+                brk_sub.add_command(label=prefix + label,
+                                    command=lambda v=v: self._set_break_min(v))
+            m.add_cascade(label="Break reminder", menu=brk_sub)
+
+            # Weather city ("off" = hidden)
+            def _edit_weather_city():
+                dlg = InputDialog(self, "Weather",
+                                  "City name, \"on\" = auto-detect, \"off\" = hide:",
+                                  default=self._weather_city or "off")
+                if dlg.result is not None:
+                    v = dlg.result.strip()
+                    self._weather_city = "" if v.lower() in ("off", "none", "-") else v
+                    self._save_config()
+                    self._weather_start(force=True)
+            city = self._weather_city or "off"
+            m.add_command(label=f"Weather: {city}", command=_edit_weather_city)
             m.add_separator()
 
             # Terminal log auto-cleanup
@@ -4143,6 +4454,10 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             m.add_checkbutton(label="Screenshot options",
                               variable=self._show_options,
                               onvalue=True, offvalue=False)
+
+            # Screen recording (its header button was retired)
+            m.add_command(label="Record screen...",
+                          command=self._open_recording)
             m.add_separator()
 
             # Card size submenu
@@ -4190,11 +4505,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         _cfg_btn = tk.Button(hdr, text="...", command=_show_settings, **_btn_cfg)
         _cfg_btn.pack(side="right", padx=(0, 6))
 
-        # Record
-        tk.Button(hdr, text="Record", command=self._open_recording,
-                  **_btn_cfg).pack(side="right", padx=(0, 2))
-
-        # Screenshot
+        # Screenshot (Record moved to the settings menu / Ctrl+K palette)
         tk.Button(hdr, text="Screenshot", command=self._open_screenshot,
                   **_btn_cfg).pack(side="right", padx=(0, 2))
 
@@ -4314,6 +4625,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             win_w = self.winfo_width()
         except Exception:
             win_w = 480
+        if win_w <= 1:      # not mapped yet; assume the default width
+            win_w = 480
         max_cat_tabs = (3 if win_w < 360 else
                         5 if win_w < 480 else
                         self._MAX_CAT_TABS)
@@ -4332,17 +4645,45 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             elif self._active >= self._tab_offset + max_cat_tabs:
                 self._tab_offset = self._active - max_cat_tabs + 1
 
-        # ◀ scroll button (shown only when offset is greater than 0)
-        if self._tab_offset > 0:
-            tk.Button(
-                self._tab_bar, text="◀",
-                command=self._scroll_tabs_left,
-                bg=C["bg"], fg=C["text_sub"],
-                relief="flat", bd=0,
-                font=FONT, cursor="hand2", padx=4, pady=3,
-                activebackground=C["card_h"],
-                activeforeground=C["text"],
-            ).pack(side="left")
+        # width-based fit: only create the pills that actually have room,
+        # reserving space for ◀ ▶ + and the right-side controls so none of
+        # them can ever be squeezed out of a narrow window
+        def _measure(text, bold):
+            font_val = FONT_BOLD if bold else FONT
+            fnt = self._pill_font_cache.get(font_val)
+            if fnt is None:
+                fnt = tkfont.Font(family=font_val[0], size=font_val[1],
+                                  weight="bold" if len(font_val) > 2 else "normal")
+                self._pill_font_cache[font_val] = fnt
+            return fnt.measure(text) + 22   # pill padding + pack margin
+
+        def _disp_name(i):
+            nm = self._data[i]["category"]
+            return nm[:13] + "…" if len(nm) > 14 else nm
+
+        right_w = _measure("≡", False)
+        for key, label, idx in self._SYSTEM_TABS:
+            if key in self._pinned_tabs:
+                right_w += _measure(label, self._active == idx)
+        ctrl_w = (_measure("◀", False) + _measure("▶", False)
+                  + _measure("+", False))
+        budget = max(60, win_w - right_w - ctrl_w - 10)
+
+        def _fit_end(start):
+            used, e = 0, start
+            while e < total and e - start < max_cat_tabs:
+                w_need = _measure(_disp_name(e), e == self._active)
+                if e > start and used + w_need > budget:
+                    break
+                used += w_need
+                e += 1
+            return e
+
+        end = _fit_end(self._tab_offset)
+        if 0 <= self._active < total and self._active >= end:
+            # active pill didn't fit: scroll so it becomes the first one
+            self._tab_offset = self._active
+            end = _fit_end(self._tab_offset)
 
         # Pill-style tab builder; drag_idx: category index for drag-reorder
         def _pill(parent, text, active, cmd, ctx_cmd=None, side="left",
@@ -4368,13 +4709,27 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             cv = tk.Canvas(parent, width=tw, height=th,
                            bg=C["bg"], highlightthickness=0, cursor="hand2")
             cv.pack(side=side, padx=1, pady=2)
-            def _draw(f):
+            def _draw(f, fg_over=None):
                 fill[0] = f
                 cv.delete("all")
                 _draw_rounded_rect(cv, 0, 0, tw, th, r, fill=f, outline="")
-                fg = fg_act if f == bg_act else (C["text"] if f == bg_hov else fg_idle)
+                fg = fg_over or (fg_act if f == bg_act
+                                 else (C["text"] if f == bg_hov else fg_idle))
                 cv.create_text(tw//2, th//2, text=text, font=font_val, fill=fg)
             _draw(fill[0])
+            # short fill fade-in on the freshly activated pill (tab switch only)
+            if active and getattr(self, "_tab_anim", False):
+                steps = 6
+                def _anim(i=1):
+                    if not cv.winfo_exists():
+                        return
+                    t = i / steps
+                    _draw(_blend_hex(bg_hov, bg_act, t),
+                          fg_over=_blend_hex(C["text"], "#FFFFFF", t)
+                          if fg_act == "white" else None)
+                    if i < steps:
+                        cv.after(20, lambda: _anim(i + 1))
+                _anim()
             if drag_idx is None:
                 cv.bind("<Button-1>", lambda e: cmd())
             else:
@@ -4424,44 +4779,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 cv.bind("<Leave>", lambda e: _draw(bg_idle))
             return cv
 
-        # show category tabs within the visible range
-        end = min(self._tab_offset + max_cat_tabs, total)
-        for i in range(self._tab_offset, end):
-            cat = self._data[i]
-            is_active = (i == self._active)
-            _pill(
-                self._tab_bar, cat["category"], is_active,
-                cmd=lambda i=i: self._switch_tab(i),
-                ctx_cmd=lambda e, i=i: self._tab_context_menu(e, i),
-                side="left",
-                drag_idx=i,
-            )
-
-        # ▶ scroll button (shown only when there are still tabs to the right)
-        if end < total:
-            tk.Button(
-                self._tab_bar, text="▶",
-                command=self._scroll_tabs_right,
-                bg=C["bg"], fg=C["text_sub"],
-                relief="flat", bd=0,
-                font=FONT, cursor="hand2", padx=4, pady=3,
-                activebackground=C["card_h"],
-                activeforeground=C["text"],
-            ).pack(side="left")
-
-        # '+' category add button
-        tk.Button(
-            self._tab_bar, text="+",
-            command=self._add_category,
-            bg=C["bg"], fg=C["text_sub"],
-            relief="flat", bd=0,
-            font=FONT, cursor="hand2", padx=6, pady=3,
-            activebackground=C["card_h"],
-            activeforeground=C["text"],
-        ).pack(side="left", padx=(2, 0))
-
-        # separator (spacer)
-        tk.Frame(self._tab_bar, bg=C["bg"]).pack(side="left", fill="x", expand=True)
+        # Right-side controls pack FIRST: pack squeezes the most recently
+        # packed widgets out when the window is narrow, so packing the menu
+        # button and pinned tabs early guarantees they never disappear.
 
         # ≡ menu button (rightmost)
         self._menu_btn = tk.Button(
@@ -4487,12 +4807,69 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 side="right",
             )
 
+        # '+' and '▶' join the protected right-side group; when the bar is
+        # full the spacer collapses, so they sit right next to the pills
+        tk.Button(
+            self._tab_bar, text="+",
+            command=self._add_category,
+            bg=C["bg"], fg=C["text_sub"],
+            relief="flat", bd=0,
+            font=FONT, cursor="hand2", padx=6, pady=3,
+            activebackground=C["card_h"],
+            activeforeground=C["text"],
+        ).pack(side="right", padx=(2, 0))
+
+        if end < total:   # ▶ only when there are more tabs to the right
+            tk.Button(
+                self._tab_bar, text="▶",
+                command=self._scroll_tabs_right,
+                bg=C["bg"], fg=C["text_sub"],
+                relief="flat", bd=0,
+                font=FONT, cursor="hand2", padx=4, pady=3,
+                activebackground=C["card_h"],
+                activeforeground=C["text"],
+            ).pack(side="right")
+
+        # ◀ scroll button (shown only when offset is greater than 0)
+        if self._tab_offset > 0:
+            tk.Button(
+                self._tab_bar, text="◀",
+                command=self._scroll_tabs_left,
+                bg=C["bg"], fg=C["text_sub"],
+                relief="flat", bd=0,
+                font=FONT, cursor="hand2", padx=4, pady=3,
+                activebackground=C["card_h"],
+                activeforeground=C["text"],
+            ).pack(side="left")
+
+        # show category tabs within the range that fits the current width
+        for i in range(self._tab_offset, end):
+            is_active = (i == self._active)
+            name = _disp_name(i)
+            if i == self._tab_offset:
+                # the guaranteed first pill must never overflow the budget
+                while len(name) > 3 and _measure(name, is_active) > budget:
+                    name = name[:-2] + "…"
+            _pill(
+                self._tab_bar, name, is_active,
+                cmd=lambda i=i: self._switch_tab(i),
+                ctx_cmd=lambda e, i=i: self._tab_context_menu(e, i),
+                side="left",
+                drag_idx=i,
+            )
+
+        # separator (spacer, packed last = first to shrink)
+        tk.Frame(self._tab_bar, bg=C["bg"]).pack(side="left", fill="x", expand=True)
+
     def _switch_tab(self, idx: int):
         # Cancel search when leaving Grep tab
         if self._active == -12 and idx != -12:
             self._grep_cancel = True
+        changed = idx != self._active
         self._active = idx
+        self._tab_anim = changed   # animate only on a real switch
         self._render_tabs()
+        self._tab_anim = False
         self._update_footer()
         self._render_list()
         self._save_config()   # remember the active tab for next launch
@@ -4736,12 +5113,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
     def _render_folder_list(self):
         folders = self._current["folders"]
         if not folders:
-            tk.Label(
-                self._list_frame,
-                text="No folders registered.\nClick \"+ Add Folder\" to add one.",
-                bg=C["bg"], fg=C["text_sub"],
-                font=FONT_SMALL, justify="center",
-            ).pack(pady=20)
+            _render_empty_state(self._list_frame, "No folders yet",
+                                "Click \"+ Add Folder\" to add one.")
             return
 
         size = self._card_size
@@ -4791,11 +5164,13 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                         highlightthickness=1, highlightbackground=C["border"])
         card.pack(fill="both", expand=True)
 
+        _make_type_glyph(card, _item_kind(path, item_type),
+                         C["card"]).pack(side="left", padx=(0, 2))
+
         left = tk.Frame(card, bg=C["card"])
         left.pack(side="left", fill="both", expand=True)
 
-        type_tag = "[F] " if item_type == "file" else ""
-        tk.Label(left, text=f"{type_tag}{name}",
+        tk.Label(left, text=name,
                  bg=C["card"], fg=C["text"],
                  font=name_font, anchor="w").pack(fill="x")
 
@@ -5585,12 +5960,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
     def _render_rules_list(self):
         """Render the rule list in the Auto tab."""
         if not self._rules:
-            tk.Label(
-                self._list_frame,
-                text="No rules registered.\nClick \"+ Add Rule\" to add one.",
-                bg=C["bg"], fg=C["text_sub"],
-                font=FONT_SMALL, justify="center",
-            ).pack(pady=20)
+            _render_empty_state(self._list_frame, "No rules yet",
+                                "Click \"+ Add Rule\" to add one.")
             return
         for i, rule in enumerate(self._rules):
             self._make_rule_card(i, rule)
@@ -5873,10 +6244,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         pane.pack(fill="both", expand=True)
 
         if not self._bookmarks:
-            tk.Label(pane,
-                     text="No categories.\nClick \"+ Add Category\" to start.",
-                     bg=C["bg"], fg=C["text_sub"],
-                     font=FONT_SMALL, justify="center").pack(pady=20)
+            _render_empty_state(pane, "No categories yet",
+                                "Click \"+ Add Category\" to start.")
             return
 
         # left sidebar
@@ -5892,10 +6261,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         cat = self._bookmarks[self._bm_selected]
         items = cat.get("items", [])
         if not items:
-            tk.Label(main_frame,
-                     text="No bookmarks.\nClick \"+ Add Bookmark\" to add one.",
-                     bg=C["bg"], fg=C["text_sub"],
-                     font=FONT_SMALL, justify="center").pack(pady=20)
+            _render_empty_state(main_frame, "No bookmarks yet",
+                                "Click \"+ Add Bookmark\" to add one.")
             return
 
         for i, item in enumerate(items):
@@ -5946,6 +6313,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                         highlightthickness=1, highlightbackground=C["border"])
         card.pack(fill="x", pady=PAD_ROW_Y, padx=PAD_ROW_X)
 
+        glyph = _make_type_glyph(card, "web", C["card"])
+        glyph.pack(side="left", padx=(0, 2))
+
         left = tk.Frame(card, bg=C["card"])
         left.pack(side="left", fill="both", expand=True)
 
@@ -5975,7 +6345,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         def _open(e=None):
             webbrowser.open(item["url"])
 
-        for w in (card, left) + tuple(left.winfo_children()):
+        for w in (card, left, glyph) + tuple(left.winfo_children()):
             w.bind("<Button-1>", _open)
             w.bind("<Enter>", lambda e, f=card: _set_bg(f, C["card_h"]))
             w.bind("<Leave>", lambda e, f=card: _set_bg(f, C["card"]))
@@ -6733,12 +7103,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             self._work_anim_step()
 
         if not self._tasks:
-            tk.Label(
-                self._list_frame,
-                text="No tasks registered.\nClick \"+ Add Task\" to add one.",
-                bg=C["bg"], fg=C["text_sub"],
-                font=FONT_SMALL, justify="center",
-            ).pack(pady=20)
+            _render_empty_state(self._list_frame, "No tasks yet",
+                                "Click \"+ Add Task\" to add one.")
             return
 
         if not visible:
@@ -7750,7 +8116,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
     def _on_unmap(self, event):
         if event.widget is self and self.state() == "iconic":
-            self._minimize_to_tray()
+            if getattr(self, "_min_to_tray_cfg", True):
+                self._minimize_to_tray()
+            # else: stay iconified in the taskbar
 
     def _on_close(self):
         self._flush_config_on_exit()
@@ -7760,6 +8128,137 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._card_size = size
         self._save_config()
         self._render_list()
+
+    # ── Weather (Open-Meteo, header readout) ──────────────
+
+    @staticmethod
+    def _weather_kind(code: int) -> str:
+        if code == 0:
+            return "sun"
+        if code in (1, 2):
+            return "partly"
+        if 51 <= code <= 67 or 80 <= code <= 82:
+            return "rain"
+        if 71 <= code <= 77 or 85 <= code <= 86:
+            return "snow"
+        if code >= 95:
+            return "thunder"
+        return "cloud"   # 3, fog, anything else
+
+    def _weather_apply(self, state: tuple[str, str] | None):
+        """Show or hide the header weather readout. state = (kind, temp text)."""
+        self._weather_state = state
+        if not hasattr(self, "_weather_cv"):
+            return
+        if not state:
+            self._weather_cv.pack_forget()
+            self._weather_lbl.pack_forget()
+            self._weather_var.set("")
+            return
+        kind, temp = state
+        self._weather_var.set(temp)
+        _draw_weather_icon(self._weather_cv, kind, k=0.72)   # fits the date row
+        if not self._weather_cv.winfo_ismapped():
+            self._weather_cv.pack(side="left", padx=(6, 0))
+            self._weather_lbl.pack(side="left", padx=(2, 0))
+
+    def _weather_start(self, force: bool = False):
+        """Kick a weather refresh now and every 30 min; no-op when city is blank."""
+        if getattr(self, "_weather_after_id", None) is not None:
+            try:
+                self.after_cancel(self._weather_after_id)
+            except Exception:
+                pass
+            self._weather_after_id = None
+        if force:
+            self._weather_geo = None   # re-geocode the (possibly new) city
+        if not self._weather_city:
+            self._weather_apply(None)
+            return
+        threading.Thread(target=self._weather_fetch, daemon=True).start()
+        self._weather_after_id = self.after(30 * 60_000, self._weather_start)
+
+    def _weather_fetch(self):
+        """Worker thread: geocode the city once, then read current conditions."""
+        import urllib.request
+        import urllib.parse
+        try:
+            city = self._weather_city
+            geo = getattr(self, "_weather_geo", None)
+            if not geo or geo[0] != city:
+                if city.lower() in ("on", "auto", "here"):
+                    # no city given: locate roughly by public IP
+                    req = urllib.request.Request(
+                        "https://ipapi.co/json/",
+                        headers={"User-Agent": "gem-launcher/1.0"})
+                    with urllib.request.urlopen(req, timeout=10) as r:
+                        hit = json.loads(r.read().decode("utf-8"))
+                else:
+                    q = urllib.parse.quote(city)
+                    with urllib.request.urlopen(
+                            "https://geocoding-api.open-meteo.com/v1/search"
+                            f"?name={q}&count=1", timeout=10) as r:
+                        res = json.loads(r.read().decode("utf-8"))
+                    hit = (res.get("results") or [{}])[0]
+                if "latitude" not in hit:
+                    raise ValueError("location not found")
+                geo = (city, hit["latitude"], hit["longitude"])
+                self._weather_geo = geo
+            _, lat, lon = geo
+            with urllib.request.urlopen(
+                    "https://api.open-meteo.com/v1/forecast"
+                    f"?latitude={lat}&longitude={lon}"
+                    "&current=temperature_2m,weather_code", timeout=10) as r:
+                cur = json.loads(r.read().decode("utf-8")).get("current", {})
+            temp = cur.get("temperature_2m")
+            if temp is None:
+                raise ValueError("no temperature")
+            state = (self._weather_kind(int(cur.get("weather_code", 3))),
+                     f"{round(temp)}°")
+        except Exception:
+            state = None   # offline / unknown city: hide instead of erroring
+        try:
+            self.after(0, lambda: self._weather_apply(state))   # back to Tk thread
+        except Exception:
+            pass
+
+    # ── Break reminder ────────────────────────────────────
+
+    def _set_break_min(self, minutes: int):
+        self._break_min = minutes
+        self._break_last = time.monotonic()   # restart the countdown
+        self._save_config()
+        self._break_tick_start()
+
+    def _break_tick_start(self):
+        """(Re)start the reminder heartbeat; zero wake-ups while disabled."""
+        if getattr(self, "_break_after_id", None) is not None:
+            try:
+                self.after_cancel(self._break_after_id)
+            except Exception:
+                pass
+            self._break_after_id = None
+        if self._break_min > 0:
+            self._break_after_id = self.after(30_000, self._break_tick)
+
+    def _break_tick(self):
+        self._break_after_id = None
+        if self._break_min <= 0:
+            return
+        self._break_after_id = self.after(30_000, self._break_tick)
+        if time.monotonic() - self._break_last >= self._break_min * 60:
+            self._break_last = time.monotonic()
+            item = {
+                "title": "Break time!  Look away & stretch",
+                "scheduled_at": "",
+                "recurrence": "none",
+                "notes": ("Rest your eyes on something 20 ft away for 20 s "
+                          "(20-20-20 rule), roll your shoulders, sip water."),
+            }
+            try:
+                NotificationPopup(self, item, self._notify_display_sec.get() * 1000)
+            except Exception:
+                pass
 
     def _set_font_size(self, size: int):
         """Change the font size and rebuild the UI."""
@@ -8025,12 +8524,40 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 items.append(("Web", bm.get("name", ""),
                               f"{bm.get('name', '')} {bm.get('url', '')}",
                               lambda u=bm.get("url", ""): webbrowser.open(u)))
+        for i, item in enumerate(self._notify_items):
+            title = item.get("title", "")
+            items.append(("Notify", title,
+                          f"notify {title} {item.get('notes', '')}",
+                          lambda: self._switch_tab(-3)))
         for key, label, idx in self._SYSTEM_TABS:
             items.append(("Tab", label, f"tab {label} {key}",
                           lambda i2=idx: self._switch_tab(i2)))
         for ci, cat in enumerate(self._data):
             items.append(("Tab", cat["category"], f"tab {cat['category']}",
                           lambda i2=ci: self._switch_tab(i2)))
+        # app actions: everything reachable from the header / settings menu
+        actions: list[tuple[str, str, object]] = [
+            ("Take screenshot", "screenshot capture", self._open_screenshot),
+            ("Start recording", "record screen video capture", self._open_recording),
+            ("Add folder",       "add folder new",       self._add_folder),
+            ("Add task",         "add task new",         self._add_task),
+            ("Add notification", "add notification new", self._add_notify_item),
+            ("Toggle pin on top", "pin topmost always on top",
+             lambda: (self.attributes("-topmost", not bool(self.attributes("-topmost"))),
+                      self._save_config())),
+            ("Toggle CPU/MEM monitor", "hud cpu mem monitor",
+             lambda: self._hud_enabled_var.set(not self._hud_enabled_var.get())),
+            ("Toggle minimize to tray", "tray minimize taskbar",
+             lambda: self._min_to_tray.set(not self._min_to_tray.get())),
+            ("Minimize to tray now", "hide tray minimize",
+             self._minimize_to_tray),
+        ]
+        for label, keys, fn in actions:
+            items.append(("Action", label, f"action {label} {keys}", fn))
+        for key in THEMES:
+            items.append(("Theme", f"Theme: {key.capitalize()}",
+                          f"theme color {key}",
+                          lambda k=key: self._apply_theme(k)))
         return items
 
     def _palette_goto_task(self, idx: int):
@@ -8069,16 +8596,32 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                          insertbackground=C["accent"])
         entry.pack(fill="x", padx=10, pady=(10, 6), ipady=3)
         tk.Frame(inner, bg=C["border"], height=1).pack(fill="x")
-        lb = tk.Listbox(inner, height=10, font=FONT,
-                        bg=C["card"], fg=C["text"],
-                        selectbackground=C["accent_lt"],
-                        selectforeground=C["accent_dk"],
-                        relief="flat", bd=0, activestyle="none",
-                        highlightthickness=0)
-        lb.pack(fill="both", expand=True, padx=6, pady=6)
+        lst = tk.Text(inner, height=12, font=FONT,
+                      bg=C["card"], fg=C["text"],
+                      relief="flat", bd=0, wrap="none", cursor="arrow",
+                      highlightthickness=0, takefocus=0,
+                      spacing1=2, spacing3=2, state="disabled")
+        lst.pack(fill="both", expand=True, padx=6, pady=6)
+        lst.tag_configure("selline", background=C["accent_lt"])
+        lst.tag_configure("hit", foreground=C["accent_dk"], underline=True)
+        for k, col in (("Folder", C["accent"]), ("Web", C["accent"]),
+                       ("Notify", C["accent"]), ("Conn", C["accent_dk"]),
+                       ("Task", C["accent_dk"]), ("Action", C["accent_dk"]),
+                       ("File", C["text_sub"]), ("Tab", C["text_sub"]),
+                       ("Theme", C["text_sub"])):
+            lst.tag_configure(f"k_{k}", foreground=col)
 
         items = self._palette_items()
         matches: list = []
+        sel = [0]
+        freq: dict = getattr(self, "_palette_freq", {})
+
+        def _mark_sel():
+            lst.tag_remove("selline", "1.0", "end")
+            if matches:
+                i = sel[0]
+                lst.tag_add("selline", f"{i + 1}.0", f"{i + 2}.0")
+                lst.see(f"{i + 1}.0")
 
         def _refresh(*_):
             q = var.get()
@@ -8087,13 +8630,28 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 s = _fuzzy_score(q, it[2])
                 if s is not None:
                     scored.append((s, it))
-            scored.sort(key=lambda x: x[0])
+            # ties (incl. empty query) fall back to most-used first
+            scored.sort(key=lambda x: (x[0], -freq.get(f"{x[1][0]}:{x[1][1]}", 0)))
             matches[:] = [it for _, it in scored[:12]]
-            lb.delete(0, "end")
+            sel[0] = 0
+            lst.configure(state="normal")
+            lst.delete("1.0", "end")
             for kind, label, _t, _a in matches:
-                lb.insert("end", f" [{kind}]  {label}")
-            if matches:
-                lb.selection_set(0)
+                lst.insert("end", f" {kind:<7}", (f"k_{kind}",))
+                hits = _match_positions(label, q)
+                run, run_hit = "", False
+                for i2, ch in enumerate(label):   # insert in runs, not per char
+                    is_hit = i2 in hits
+                    if run and is_hit != run_hit:
+                        lst.insert("end", run, ("hit",) if run_hit else ())
+                        run = ""
+                    run += ch
+                    run_hit = is_hit
+                if run:
+                    lst.insert("end", run, ("hit",) if run_hit else ())
+                lst.insert("end", "\n")
+            lst.configure(state="disabled")
+            _mark_sel()
 
         var.trace_add("write", _refresh)
         _refresh()
@@ -8106,31 +8664,35 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 pass
 
         def _run(_e=None):
-            sel = lb.curselection()
-            i = sel[0] if sel else 0
-            if i >= len(matches):
+            if not matches:
                 _close()
                 return
-            action = matches[i][3]
+            kind, label, _t, action = matches[min(sel[0], len(matches) - 1)]
+            key = f"{kind}:{label}"
+            freq[key] = freq.get(key, 0) + 1
+            self._palette_freq = freq
+            self._save_config()
             _close()
             self.after(10, action)   # run after the palette is gone
 
         def _move(d):
-            cur = lb.curselection()
-            cur = cur[0] if cur else 0
-            nxt = max(0, min(len(matches) - 1, cur + d))
-            lb.selection_clear(0, "end")
-            lb.selection_set(nxt)
-            lb.see(nxt)
+            if matches:
+                sel[0] = max(0, min(len(matches) - 1, sel[0] + d))
+                _mark_sel()
+            return "break"
+
+        def _click(e):
+            i = int(lst.index(f"@{e.x},{e.y}").split(".")[0]) - 1
+            if 0 <= i < len(matches):
+                sel[0] = i
+                _run()
             return "break"
 
         entry.bind("<Return>",  _run)
         entry.bind("<Escape>",  _close)
         entry.bind("<Down>",    lambda e: _move(1))
         entry.bind("<Up>",      lambda e: _move(-1))
-        lb.bind("<Return>",          _run)
-        lb.bind("<Double-Button-1>", _run)
-        lb.bind("<Escape>",          _close)
+        lst.bind("<Button-1>",  _click)
 
         # close when focus leaves the palette (click elsewhere / Alt-Tab)
         def _maybe_close(_e=None):
@@ -8145,7 +8707,6 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                     _close()
             win.after(120, _check)
         entry.bind("<FocusOut>", _maybe_close)
-        lb.bind("<FocusOut>",    _maybe_close)
 
         self.update_idletasks()
         w = max(360, min(520, self.winfo_width() - 40))
@@ -8215,7 +8776,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         if self._activate_event.is_set():
             self._activate_event.clear()
             self._on_activate_signal()
-        self.after(150, self._poll_hotkey)
+        self.after(250, self._poll_hotkey)
 
     def _on_dnd_drop(self, event):
         try:
@@ -8392,10 +8953,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         # scrolls the nearest scrollable canvas under the pointer
 
         if not by_date:
-            tk.Label(body,
-                     text="No history yet.\nProgress changes are recorded from now on.",
-                     bg=C["bg"], fg=C["text_sub"], font=FONT_SMALL,
-                     justify="center").pack(pady=24)
+            _render_empty_state(body, "No history yet",
+                                "Progress changes are recorded from now on.")
         else:
             MAX_DAYS = 30
             dates = sorted(by_date.keys(), reverse=True)
@@ -8902,12 +9461,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 upcoming.append((i, item))
 
         if not upcoming and not past:
-            tk.Label(
-                self._list_frame,
-                text="No notifications registered.\nClick \"+ Add Notification\" to add one.",
-                bg=C["bg"], fg=C["text_sub"],
-                font=FONT_SMALL, justify="center",
-            ).pack(pady=20)
+            _render_empty_state(self._list_frame, "No notifications yet",
+                                "Click \"+ Add Notification\" to add one.")
             return
 
         # ── Upcoming ──
@@ -9153,11 +9708,14 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
     # ── Other ─────────────────────────────────────────────
 
     def _tick(self):
-        now = datetime.datetime.now()
-        self._clock_var.set(now.strftime("%H:%M:%S"))
-        self._date_var.set(now.strftime("%m/%d %a").upper())
-        self._update_hud()
-        self._update_banner()
+        # skip all per-second UI work while minimized / in the tray;
+        # everything here redraws again on the first tick after restore
+        if self._is_visible():
+            now = datetime.datetime.now()
+            self._clock_var.set(now.strftime("%H:%M:%S"))
+            self._date_var.set(now.strftime("%m/%d %a").upper())
+            self._update_hud()
+            self._update_banner()
         self._tick_id = self.after(1000, self._tick)
 
     def _is_visible(self) -> bool:
@@ -9178,7 +9736,6 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         else:
             self._hud_cv.pack_forget()
             self._hud_lbl.pack_forget()
-            self._hud_tip_hide()
 
     def _on_toggle_hud(self, *_):
         self._hud_enabled = self._hud_enabled_var.get()
@@ -9202,59 +9759,6 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                       command=lambda: self._hud_enabled_var.set(False))
         self._popup_menu(m, event.x_root, event.y_root)
 
-    def _hud_stats_text(self) -> str:
-        """Now / average / peak over the sample window, for the hover tooltip."""
-        def stats(d):
-            return (d[-1], sum(d) / len(d), max(d)) if d else (0.0, 0.0, 0.0)
-        c_now, c_avg, c_max = stats(self._hud_cpu)
-        r_now, r_avg, r_max = stats(self._hud_ram)
-        lines = [f"CPU now{c_now:4.0f}%  avg{c_avg:4.0f}%  max{c_max:4.0f}%",
-                 f"MEM now{r_now:4.0f}%  avg{r_avg:4.0f}%  max{r_max:4.0f}%"]
-        if self._hud_ram_gb:
-            used, total = self._hud_ram_gb
-            lines.append(f"    {used:.1f} / {total:.1f} GB  (last 60s)")
-        return "\n".join(lines)
-
-    def _hud_tip_schedule(self, _e=None):
-        """Show the tooltip only after the pointer rests on the HUD a moment,
-        so merely passing over the header doesn't pop it up."""
-        if self._hud_tip_after is not None:
-            try:
-                self.after_cancel(self._hud_tip_after)
-            except Exception:
-                pass
-        self._hud_tip_after = self.after(700, self._hud_tip_show)
-
-    def _hud_tip_show(self, _e=None):
-        self._hud_tip_after = None
-        if self._hud_tip is not None or not self._hud_enabled:
-            return
-        tip = tk.Toplevel(self)
-        tip.overrideredirect(True)
-        tip.attributes("-topmost", True)
-        lbl = tk.Label(tip, text=self._hud_stats_text(), justify="left",
-                       bg=C["accent_dk"], fg="white",
-                       font=(FONT_MONO[0], max(7, FONT_BASE - 2)),
-                       padx=8, pady=5)
-        lbl.pack()
-        tip.geometry(f"+{self._hud_cv.winfo_rootx()}"
-                     f"+{self._hud_cv.winfo_rooty() + self._hud_cv.winfo_height() + 6}")
-        self._hud_tip, self._hud_tip_lbl = tip, lbl
-
-    def _hud_tip_hide(self, _e=None):
-        if self._hud_tip_after is not None:
-            try:
-                self.after_cancel(self._hud_tip_after)
-            except Exception:
-                pass
-            self._hud_tip_after = None
-        if self._hud_tip is not None:
-            try:
-                self._hud_tip.destroy()
-            except tk.TclError:
-                pass
-            self._hud_tip = self._hud_tip_lbl = None
-
     def _update_hud(self):
         """Sample CPU/RAM and redraw the header sparkline + readout."""
         if not self._hud_enabled or not self._is_visible():
@@ -9269,43 +9773,27 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             self._hud_ram_gb = (used, total)
         self._draw_hud()
 
-    def _draw_hud(self, pulse: float = 0.35):
-        """Redraw the header sparkline + readout with a neon glow halo.
+    def _draw_hud(self):
+        """Redraw the header sparkline + compact readout.
 
-        pulse (0-1) sets the glow bloom intensity; _pulse_hud() animates
-        it while CPU/RAM usage is high for an alarm-like effect.
+        Details (avg/max, RAM in GB) live in the hover tooltip.
         """
         cv = getattr(self, "_hud_cv", None)
         if cv is None or not cv.winfo_exists():
             return
         c = int(self._hud_cpu[-1]) if self._hud_cpu else 0
         r = int(self._hud_ram[-1]) if self._hud_ram else 0
-        hot = c >= 80 or r >= 80
-        mem_txt = f"MEM{r:3d}%"
-        if self._hud_ram_gb:
-            used, total = self._hud_ram_gb
-            mem_txt += f" {used:.1f}/{total:.0f}GB"
         self._hud_lbl.configure(
-            text=f"CPU{c:3d}%\n{mem_txt}",
-            fg=_blend_hex(C["accent_lt"], C["btn_del_h"], pulse) if hot else C["accent_lt"],
+            text=f"CPU{c:3d}%\nMEM{r:3d}%",
+            fg=C["accent_lt"],
         )
-        if self._hud_tip_lbl is not None:
-            try:
-                self._hud_tip_lbl.configure(text=self._hud_stats_text())
-            except tk.TclError:
-                pass
 
         cv.delete("all")
-        w = cv.winfo_width() or 56
+        w = cv.winfo_width() or 44
         h = cv.winfo_height() or 24
         bg = C["accent"]
 
-        # 80% alarm threshold guide line
-        y80 = h - 2 - (h - 4) * 0.8
-        cv.create_line(1, y80, w - 1, y80, dash=(2, 3),
-                       fill=_blend_hex(bg, C["btn_del_h"], 0.55))
-
-        def _spark(data, color, glow_t):
+        def _spark(data, color, fill_t):
             if len(data) < 2:
                 return
             n, ln = data.maxlen, len(data)
@@ -9313,41 +9801,39 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             for i, v in enumerate(data):
                 pts.append(1 + (w - 2) * (n - ln + i) / (n - 1))      # x: anchored right
                 pts.append(h - 2 - (h - 4) * v / 100.0)               # y: 0-100%
-            cv.create_line(*pts, fill=_blend_hex(bg, color, glow_t), width=3, smooth=True)
+            # translucent-looking area fill under the curve (instrument style)
+            cv.create_polygon(*(pts + [pts[-2], h - 1, pts[0], h - 1]),
+                              fill=_blend_hex(bg, color, fill_t),
+                              outline="", smooth=True)
+            cv.create_line(*pts, fill=_blend_hex(bg, color, 0.35), width=3, smooth=True)
             cv.create_line(*pts, fill=color, width=1, smooth=True)
 
-        _spark(self._hud_ram, C["accent_dk"], pulse if r >= 80 else 0.35)
-        _spark(self._hud_cpu, "#FFFFFF",      pulse if c >= 80 else 0.35)
+        _spark(self._hud_ram, C["accent_dk"], 0.28)
+        _spark(self._hud_cpu, "#FFFFFF",      0.14)
 
     def _pulse_loop(self):
-        """~8fps loop that animates Terminal-tab ping dots and the HUD glow (alarm)."""
+        """Animates the Terminal-tab ping dots.
+
+        Runs at ~8fps only while something is actually animating; idles at a
+        slow heartbeat otherwise so the app stays quiet in the background.
+        """
         visible = self._is_visible()
+        animating = False
         try:
             if visible:
-                self._pulse_ping_dots()
-                self._pulse_hud()
+                animating = bool(self._pulse_ping_dots())
         finally:
-            # fewer event-loop wake-ups while minimized / in the tray
-            self.after(120 if visible else 800, self._pulse_loop)
+            # fewer event-loop wake-ups while idle / minimized / in the tray
+            self.after(120 if animating else (600 if visible else 1500),
+                       self._pulse_loop)
 
-    def _pulse_hud(self):
-        """Pulse the HUD glow while CPU or RAM usage is high (>= 80%)."""
-        if not self._hud_enabled:
-            return
-        c = int(self._hud_cpu[-1]) if self._hud_cpu else 0
-        r = int(self._hud_ram[-1]) if self._hud_ram else 0
-        if c < 80 and r < 80:
-            return
-        t = time.monotonic()
-        pulse = 0.35 + 0.55 * (0.5 + 0.5 * math.sin(t * 4.0))
-        self._draw_hud(pulse)
-
-    def _pulse_ping_dots(self):
+    def _pulse_ping_dots(self) -> bool:
         if not self._conn_ping_enabled or not self._conn_ping_dots:
-            return
+            return False
         t = time.monotonic()
         ok_col   = _blend_hex("#2E8033", "#6FE87E", 0.5 + 0.5 * math.sin(t * 2.0))
         fail_col = _blend_hex(C["btn_del"], C["card"], 0.3 + 0.3 * math.sin(t * 5.0))
+        animated = False
         for host, cvs in self._conn_ping_dots.items():
             status = self._conn_ping_cache.get(host)
             if status == "ok":
@@ -9359,8 +9845,10 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             for cv in cvs:
                 try:
                     cv.itemconfigure("dot", fill=color)
+                    animated = True
                 except tk.TclError:
                     pass   # widget already destroyed
+        return animated
 
     def _update_banner(self):
         """Display the next notification in the banner label."""
