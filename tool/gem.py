@@ -536,14 +536,155 @@ def _draw_weather_icon(cv: tk.Canvas, kind: str, k: float = 1.0):
 
 
 def _render_empty_state(parent, title: str, hint: str):
-    """Friendly placeholder for an empty list: title + hint."""
+    """Friendly placeholder for an empty list: soft glyph + title + hint."""
     box = tk.Frame(parent, bg=C["bg"])
-    box.pack(expand=True, pady=36)
+    box.pack(expand=True, pady=30)
+    # big soft folder with sparkles (canvas-drawn, no emoji fonts)
+    cv = tk.Canvas(box, width=72, height=56, bg=C["bg"], highlightthickness=0)
+    cv.pack(pady=(0, 10))
+    soft  = _blend_hex(C["accent"], C["bg"], 0.55)
+    front = _blend_hex(C["accent"], C["bg"], 0.38)
+    spark = _blend_hex(C["accent"], C["bg"], 0.25)
+    cv.create_rectangle(14, 12, 34, 22, fill=soft, outline="")   # folder tab
+    _draw_rounded_rect(cv, 14, 16, 58, 48, 7, fill=soft)         # body (back)
+    _draw_rounded_rect(cv, 14, 24, 58, 48, 7, fill=front)        # front flap
+    for sx, sy, sr in ((63, 14, 4), (8, 30, 3), (64, 34, 2)):    # sparkles
+        cv.create_line(sx - sr, sy, sx + sr, sy, fill=spark, width=2)
+        cv.create_line(sx, sy - sr, sx, sy + sr, fill=spark, width=2)
     tk.Label(box, text=title, bg=C["bg"], fg=C["text"],
              font=FONT_BOLD).pack(pady=(0, 3))
     tk.Label(box, text=hint, bg=C["bg"], fg=C["text_sub"],
              font=FONT_SMALL, justify="center").pack()
     return box
+
+
+class _PillBtn(tk.Canvas):
+    """Rounded pill-shaped canvas button (flat tk.Buttons look dated).
+
+    Drop-in enough for this file's needs: supports configure(text=...,
+    command=...) so _update_footer can retarget it like a tk.Button, resizes
+    with pack(fill="x", expand=True), and reads theme colors at draw time.
+    kind: "primary" (accent) / "soft" (accent_lt) / "header" (accent_dk).
+    """
+
+    def __init__(self, parent, text="", command=None, kind="primary",
+                 font=None, padx=14, pady=6, bg=None, fixed=False):
+        self._text    = text
+        self._command = command
+        self._kind    = kind
+        self._font    = font or FONT_BOLD
+        self._padx    = padx
+        self._fixed   = fixed   # True: width follows the text (header buttons)
+        self._hover   = False
+        self._fnt = tkfont.Font(family=self._font[0], size=self._font[1],
+                                weight="bold" if len(self._font) > 2
+                                else "normal")
+        h = self._fnt.metrics("linespace") + 2 * pady
+        w = self._fnt.measure(text) + 2 * padx
+        super().__init__(parent, height=h, width=w,
+                         bg=bg if bg is not None else C["bg"],
+                         highlightthickness=0, bd=0, cursor="hand2")
+        self.bind("<Configure>", lambda e: self._draw())
+        self.bind("<Enter>", lambda e: self._set_hover(True))
+        self.bind("<Leave>", lambda e: self._set_hover(False))
+        self.bind("<Button-1>", self._on_click)
+
+    def _palette(self):
+        if self._kind == "header":
+            base, hov = C["accent_dk"], C["accent_lt"]
+            fg,   fg_h = "white", _ink_on(C["accent_lt"])
+        elif self._kind == "soft":
+            base, hov = C["accent_lt"], C["border"]
+            fg,   fg_h = _ink_on(C["accent_lt"]), _ink_on(C["border"])
+        else:   # primary
+            base, hov, fg, fg_h = C["accent"], C["accent_dk"], "white", "white"
+        return (hov, fg_h) if self._hover else (base, fg)
+
+    def _draw(self):
+        w = self.winfo_width()
+        h = self.winfo_height()
+        if w <= 1 or h <= 1:
+            w, h = self.winfo_reqwidth(), self.winfo_reqheight()
+        fill, fg = self._palette()
+        self.delete("all")
+        _draw_rounded_rect(self, 0, 0, w, h, min(h // 2, 12), fill=fill)
+        self.create_text(w // 2, h // 2, text=self._text,
+                         font=self._font, fill=fg)
+
+    def _set_hover(self, on: bool):
+        self._hover = on
+        self._draw()
+
+    def _on_click(self, _e):
+        if self._command is not None:
+            self._command()
+
+    def configure(self, cnf=None, **kw):
+        if cnf:
+            kw.update(cnf)
+        if "text" in kw:
+            self._text = kw.pop("text")
+            if self._fixed:
+                super().configure(
+                    width=self._fnt.measure(self._text) + 2 * self._padx)
+        if "command" in kw:
+            self._command = kw.pop("command")
+        if kw:
+            super().configure(**kw)
+        self._draw()
+
+    config = configure
+
+
+def _rounded_card(outer, radius=10, pad_x=0, pad_y=0):
+    """Rounded 'plate' canvas holding a rectangular content frame.
+
+    The content frame is inset horizontally by the corner radius so its
+    square edges stay inside the straight part of the rounded outline.
+    Returns (plate, content, redraw); redraw(fill=, outline=, ow=) restyles
+    the plate (ow = outline ring width). The plate follows the content's
+    required height and the parent's width.
+    """
+    plate = tk.Canvas(outer, bg=C["bg"], highlightthickness=0, bd=0,
+                      height=10)
+    plate.pack(fill="both", expand=True)
+    content = tk.Frame(plate, bg=C["card"], padx=pad_x, pady=pad_y,
+                       relief="flat", bd=0)
+    win_id = plate.create_window(radius, 0, window=content, anchor="nw")
+    st = {"fill": C["card"], "outline": C["border"], "ow": 1}
+
+    def redraw(fill=None, outline=None, ow=None):
+        if fill is not None:
+            st["fill"] = fill
+        if outline is not None:
+            st["outline"] = outline
+        if ow is not None:
+            st["ow"] = ow
+        w, h = plate.winfo_width(), plate.winfo_height()
+        if w <= 1 or h <= 1:
+            return
+        plate.delete("plate")
+        b = st["ow"]
+        # border ring = outline-colored plate under an inset fill plate
+        # (_draw_rounded_rect cannot stroke outlines cleanly)
+        _draw_rounded_rect(plate, 0, 0, w, h, radius,
+                           fill=st["outline"], tags="plate")
+        _draw_rounded_rect(plate, b, b, w - b, h - b, max(2, radius - b),
+                           fill=st["fill"], tags="plate")
+        plate.tag_lower("plate")
+
+    def _sync(_e=None):
+        plate.itemconfigure(win_id,
+                            width=max(1, plate.winfo_width() - 2 * radius))
+        h = content.winfo_reqheight()
+        if plate.winfo_height() != h:
+            plate.configure(height=h)
+        redraw()
+
+    plate.bind("<Configure>", _sync)
+    content.bind("<Configure>", _sync)
+    plate._redraw = redraw
+    return plate, content, redraw
 
 
 def _autohide_scrollbar(sb, lo, hi, pack_kw):
@@ -565,6 +706,27 @@ def _blend_hex(c1: str, c2: str, t: float) -> str:
     a = [int(c1[i:i + 2], 16) for i in (1, 3, 5)]
     b = [int(c2[i:i + 2], 16) for i in (1, 3, 5)]
     return "#%02X%02X%02X" % tuple(round(x + (y - x) * t) for x, y in zip(a, b))
+
+
+def _luma(color: str, widget: "tk.Misc | None" = None) -> float:
+    """Perceived luminance 0-255 of a Tk color ('#RRGGBB' or a named color)."""
+    if color.startswith("#") and len(color) == 7:
+        r, g, b = (int(color[i:i + 2], 16) for i in (1, 3, 5))
+    elif widget is not None:
+        r, g, b = (v // 256 for v in widget.winfo_rgb(color))
+    else:
+        return 128.0
+    return 0.299 * r + 0.587 * g + 0.114 * b
+
+
+def _ink_on(bg_hex: str) -> str:
+    """Whichever theme ink (text / bg color) reads better on the given fill.
+
+    accent_lt is light in light themes but mid-tone in dark ones, so a fixed
+    fg=C["text"] washes out there; pick per theme by luminance distance.
+    """
+    lb = _luma(bg_hex)
+    return max((C["text"], C["bg"]), key=lambda c: abs(_luma(c) - lb))
 
 
 # Port used to probe connection latency via a plain TCP connect.
@@ -1453,7 +1615,7 @@ class ConnectionDialog(tk.Toplevel):
                   activebackground=C["accent_dk"], activeforeground="white",
                   ).pack(side="right", padx=(4, 0))
         tk.Button(btn_frame, text="Cancel", command=self.destroy,
-                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]), relief="flat", bd=0,
                   font=FONT, cursor="hand2", padx=10, pady=4,
                   activebackground=C["border"], activeforeground=C["text"],
                   ).pack(side="right")
@@ -1640,7 +1802,7 @@ class BookmarkDialog(tk.Toplevel):
                   activebackground=C["accent_dk"], activeforeground="white",
                   ).pack(side="right", padx=(4, 0))
         tk.Button(btn_frame, text="Cancel", command=self.destroy,
-                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]), relief="flat", bd=0,
                   font=FONT, cursor="hand2", padx=10, pady=4,
                   activebackground=C["border"], activeforeground=C["text"],
                   ).pack(side="right")
@@ -1829,7 +1991,7 @@ class TaskDialog(tk.Toplevel):
         for p in self._work_folders_list:
             self._wf_lb.insert("end", os.path.basename(p) or p)
 
-        _wf_btn_cfg = dict(bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+        _wf_btn_cfg = dict(bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]), relief="flat", bd=0,
                            font=FONT_SMALL, cursor="hand2", padx=5,
                            activebackground=C["border"])
         wf_btn_col = tk.Frame(wf_outer, bg=C["bg"])
@@ -1858,7 +2020,7 @@ class TaskDialog(tk.Toplevel):
                   activebackground=C["accent_dk"], activeforeground="white",
                   ).pack(side="right", padx=(4, 0))
         tk.Button(btn_frame, text="Cancel", command=self.destroy,
-                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]), relief="flat", bd=0,
                   font=FONT, cursor="hand2", padx=10, pady=4,
                   activebackground=C["border"], activeforeground=C["text"],
                   ).pack(side="right")
@@ -2036,7 +2198,7 @@ class SubtaskDialog(tk.Toplevel):
                   activebackground=C["accent_dk"], activeforeground="white",
                   ).pack(side="right", padx=(4, 0))
         tk.Button(btn_frame, text="Cancel", command=self.destroy,
-                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]), relief="flat", bd=0,
                   font=FONT, cursor="hand2", padx=10, pady=4,
                   activebackground=C["border"], activeforeground=C["text"],
                   ).pack(side="right")
@@ -2283,7 +2445,7 @@ class RecordingWindow(tk.Toplevel):
                  relief="flat", bd=1, width=28,
                  insertbackground=C["accent"]).pack(side="left", fill="x", expand=True)
         tk.Button(dir_frame, text="...", command=self._browse_dir,
-                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]), relief="flat", bd=0,
                   font=FONT, cursor="hand2", padx=6, pady=1,
                   activebackground=C["border"]).pack(side="left", padx=(4, 0))
 
@@ -2529,7 +2691,7 @@ class ScreenshotWindow(tk.Toplevel):
                  insertbackground=C["accent"]).pack(side="left", fill="x", expand=True)
         tk.Button(dir_frame, text="…",
                   command=self._browse_dir,
-                  bg=C["accent_lt"], fg=C["text"],
+                  bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]),
                   relief="flat", bd=0, font=FONT,
                   cursor="hand2", padx=6, pady=1,
                   activebackground=C["border"]).pack(side="left", padx=(4, 0))
@@ -2648,7 +2810,7 @@ class FileScanWindow(tk.Toplevel):
         entry.bind("<Return>", lambda _: self._start_scan())
 
         tk.Button(top, text="…", command=self._browse,
-                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]), relief="flat", bd=0,
                   font=FONT, cursor="hand2", padx=6, pady=1,
                   activebackground=C["border"]).pack(side="left", padx=(0, 4))
 
@@ -2705,7 +2867,7 @@ class FileScanWindow(tk.Toplevel):
         self._status_lbl.pack(side="left", fill="x", expand=True)
 
         tk.Button(bot, text="Export CSV", command=self._export_csv,
-                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]), relief="flat", bd=0,
                   font=FONT, cursor="hand2", padx=8, pady=2,
                   activebackground=C["border"]).pack(side="right")
 
@@ -3191,7 +3353,7 @@ class NotifyDialog(tk.Toplevel):
         for p in self._open_paths_list:
             self._paths_lb.insert("end", os.path.basename(p) or p)
 
-        _btn_cfg = dict(bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+        _btn_cfg = dict(bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]), relief="flat", bd=0,
                         font=FONT_SMALL, cursor="hand2", padx=5,
                         activebackground=C["border"])
         btn_col = tk.Frame(open_outer, bg=C["bg"])
@@ -3221,7 +3383,7 @@ class NotifyDialog(tk.Toplevel):
                   activebackground=C["accent_dk"], activeforeground="white",
                   ).pack(side="right", padx=(4, 0))
         tk.Button(btn_frame, text="Cancel", command=self.destroy,
-                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]), relief="flat", bd=0,
                   font=FONT, cursor="hand2", padx=10, pady=4,
                   activebackground=C["border"], activeforeground=C["text"],
                   ).pack(side="right")
@@ -3305,7 +3467,7 @@ class InputDialog(tk.Toplevel):
                   activebackground=C["accent_dk"], activeforeground="white",
                   ).pack(side="right", padx=(4, 0))
         tk.Button(btn_frame, text="Cancel", command=self._cancel,
-                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]), relief="flat", bd=0,
                   font=FONT, cursor="hand2", padx=10, pady=4,
                   activebackground=C["border"], activeforeground=C["text"],
                   ).pack(side="right")
@@ -3445,7 +3607,7 @@ class RuleDialog(tk.Toplevel):
                   activebackground=C["accent_dk"], activeforeground="white",
                   ).pack(side="right", padx=(4, 0))
         tk.Button(btn_frame, text="Cancel", command=self.destroy,
-                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]), relief="flat", bd=0,
                   font=FONT, cursor="hand2", padx=10, pady=4,
                   activebackground=C["border"], activeforeground=C["text"],
                   ).pack(side="right")
@@ -3873,6 +4035,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 self._min_to_tray_cfg = True
                 self._break_min = 0
                 self._weather_city = ""
+                self._weather_proxy = ""
                 self._palette_freq = {}
                 C.update(THEMES.get(self._theme, THEMES["plush"]))
                 return
@@ -3951,6 +4114,10 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
         # weather in the header: city name ("" = off)
         self._weather_city = str(cfg.get("weather_city", "") or "")
+        # explicit HTTP(S) proxy for weather fetches ("" = system settings);
+        # needed on intranets where the proxy is PAC-configured, which
+        # urllib cannot discover on its own
+        self._weather_proxy = str(cfg.get("weather_proxy", "") or "")
 
         # command palette: use counts for most-used-first ordering
         try:
@@ -4047,6 +4214,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             "minimize_to_tray": getattr(self, "_min_to_tray_cfg", True),
             "break_reminder_min": getattr(self, "_break_min", 0),
             "weather_city":    getattr(self, "_weather_city", ""),
+            "weather_proxy":   getattr(self, "_weather_proxy", ""),
             # keep only the 200 most-used entries so the file stays small
             "palette_freq":    dict(sorted(
                 getattr(self, "_palette_freq", {}).items(),
@@ -4239,8 +4407,19 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         if bp == self._prev_bp:
             return
         self._prev_bp = bp
+        self._apply_header_bp(bp)
         self._render_tabs()
         self._render_list()
+
+    def _apply_header_bp(self, bp: str):
+        """Show/hide header extras that don't fit at narrow widths."""
+        btn = getattr(self, "_shot_btn", None)
+        if btn is None:
+            return
+        if bp == "xs":
+            btn.pack_forget()
+        elif not btn.winfo_ismapped():
+            btn.pack(side="right", padx=(0, 2))
 
     # ── UI construction ───────────────────────────────────
 
@@ -4269,10 +4448,15 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         # weather tucked next to the date (drawn icon + temp; hidden when off)
         self._weather_var = tk.StringVar(value="")
         self._weather_cv = tk.Canvas(_clk_row2, width=15, height=13,
-                                     bg=C["accent"], highlightthickness=0)
+                                     bg=C["accent"], highlightthickness=0,
+                                     cursor="hand2")
         self._weather_lbl = tk.Label(_clk_row2, textvariable=self._weather_var,
                                      bg=C["accent"], fg="white",
-                                     font=(FONT_MONO[0], max(7, FONT_BASE - 3)))
+                                     font=(FONT_MONO[0], max(7, FONT_BASE - 3)),
+                                     cursor="hand2")
+        for _w in (self._weather_cv, self._weather_lbl):
+            _w.bind("<Button-1>", lambda e: self._weather_start())  # refresh now
+            self._attach_tip(_w, self._weather_tip_text)
         self._weather_apply(getattr(self, "_weather_state", None))
 
         # HUD: CPU/RAM sparkline + readout (fed by _tick)
@@ -4313,11 +4497,6 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._show_options = tk.BooleanVar(value=False)
 
         self._tick()
-
-        _btn_cfg = dict(bg=C["accent_dk"], fg="white", relief="flat", bd=0,
-                        font=FONT_SMALL, cursor="hand2",
-                        activebackground=C["accent_lt"], activeforeground=C["text"],
-                        padx=10, pady=3)
 
         # ⚙ Settings menu (rightmost)
         def _show_settings():
@@ -4420,7 +4599,27 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                     self._save_config()
                     self._weather_start(force=True)
             city = self._weather_city or "off"
+            if self._weather_city and getattr(self, "_weather_err", ""):
+                city += " (error)"
             m.add_command(label=f"Weather: {city}", command=_edit_weather_city)
+
+            # Weather proxy (for intranet networks; "off" = system settings)
+            def _edit_weather_proxy():
+                dlg = InputDialog(self, "Weather Proxy",
+                                  "Proxy URL http://[user:pass@]host:port\n"
+                                  "(\"off\" = use system settings):",
+                                  default=self._weather_proxy or "off")
+                if dlg.result is not None:
+                    v = dlg.result.strip()
+                    self._weather_proxy = (
+                        "" if v.lower() in ("off", "none", "-", "system") else v)
+                    self._save_config()
+                    self._weather_start(force=True)
+            px = self._weather_proxy or "system"
+            if "@" in px:   # never show user:pass in the menu
+                px = "…@" + px.rsplit("@", 1)[1]
+            m.add_command(label=f"Weather proxy: {px}",
+                          command=_edit_weather_proxy)
             m.add_separator()
 
             # Terminal log auto-cleanup
@@ -4502,12 +4701,18 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             self._popup_menu(m, _cfg_btn.winfo_rootx(),
                          _cfg_btn.winfo_rooty() + _cfg_btn.winfo_height())
 
-        _cfg_btn = tk.Button(hdr, text="...", command=_show_settings, **_btn_cfg)
+        _cfg_btn = _PillBtn(hdr, text="...", command=_show_settings,
+                            kind="header", font=FONT_SMALL, padx=10, pady=4,
+                            bg=C["accent"], fixed=True)
         _cfg_btn.pack(side="right", padx=(0, 6))
 
-        # Screenshot (Record moved to the settings menu / Ctrl+K palette)
-        tk.Button(hdr, text="Screenshot", command=self._open_screenshot,
-                  **_btn_cfg).pack(side="right", padx=(0, 2))
+        # Screenshot (Record moved to the settings menu / Ctrl+K palette);
+        # hidden at the xs breakpoint where it would clip mid-word
+        self._shot_btn = _PillBtn(hdr, text="Screenshot",
+                                  command=self._open_screenshot,
+                                  kind="header", font=FONT_SMALL,
+                                  padx=12, pady=4, bg=C["accent"], fixed=True)
+        self._shot_btn.pack(side="right", padx=(0, 2))
 
 
         # Minimize to tray
@@ -4576,46 +4781,31 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         canvas.bind_all("<MouseWheel>", _on_wheel)
         self._canvas = canvas
 
-        # footer (buttons are reused on tab switch)
-        self._footer = tk.Frame(self, bg=C["bg"], pady=3)
-        self._footer.pack(fill="x", padx=4)
-        self._footer_btn = tk.Button(
-            self._footer, text="+ Add Folder",
-            command=self._add_folder,
-            bg=C["accent"], fg="white", relief="flat", bd=0,
-            font=FONT_BOLD, cursor="hand2", padx=12, pady=4,
-            activebackground=C["accent_dk"], activeforeground="white",
-        )
+        # footer (pill buttons, reused on tab switch via configure())
+        self._footer = tk.Frame(self, bg=C["bg"], pady=4)
+        self._footer.pack(fill="x", padx=6)
+        self._footer_btn = _PillBtn(
+            self._footer, text="+ Add Folder", command=self._add_folder,
+            kind="primary", font=FONT_BOLD)
         self._footer_btn.pack(side="left", fill="x", expand=True)
-        _hover(self._footer_btn, C["accent_dk"], C["accent"])
 
         # "Add File" button for folder tabs only
-        self._footer_btn2 = tk.Button(
-            self._footer, text="+ Add File",
-            command=self._add_file,
-            bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
-            font=FONT_BOLD, cursor="hand2", padx=12, pady=4,
-            activebackground=C["border"], activeforeground=C["text"],
-        )
-        self._footer_btn2.pack(side="left", fill="x", expand=True, padx=(2, 0))
-        _hover(self._footer_btn2, C["border"], C["accent_lt"])
+        self._footer_btn2 = _PillBtn(
+            self._footer, text="+ Add File", command=self._add_file,
+            kind="soft", font=FONT_BOLD)
+        self._footer_btn2.pack(side="left", fill="x", expand=True, padx=(4, 0))
 
         # "Export" button for Tasks tab only
-        self._footer_btn3 = tk.Button(
-            self._footer, text="Export",
-            command=self._export_tasks,
-            bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
-            font=FONT_BOLD, cursor="hand2", padx=12, pady=4,
-            activebackground=C["border"], activeforeground=C["text"],
-        )
-        _hover(self._footer_btn3, C["border"], C["accent_lt"])
+        self._footer_btn3 = _PillBtn(
+            self._footer, text="Export", command=self._export_tasks,
+            kind="soft", font=FONT_BOLD)
 
     # ── Tab bar ───────────────────────────────────────────
 
     # maximum number of category tabs shown in the tab bar at once
     _MAX_CAT_TABS = 7
 
-    def _render_tabs(self):
+    def _render_tabs(self, keep_scroll: bool = False):
         for w in self._tab_bar.winfo_children():
             w.destroy()
         self._cat_pills = []   # category pills (drag-reorder hit test)
@@ -4634,12 +4824,16 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         # ── category tabs (left side) ──────────────────────────────
         total = len(self._data)
 
-        # clamp offset to safe range
-        max_offset = max(0, total - max_cat_tabs)
+        # clamp offset to safe range (total - 1, not total - max_cat_tabs:
+        # width-based fit below may show fewer than max_cat_tabs pills, so
+        # the last tabs must stay reachable via ▶ in a narrow window)
+        max_offset = max(0, total - 1)
         self._tab_offset = max(0, min(self._tab_offset, max_offset))
 
         # auto-scroll so the active category tab is within the visible range
-        if 0 <= self._active < total:
+        # (skipped for manual ◀/▶ scrolling, which must be able to move
+        # the view away from the active tab)
+        if not keep_scroll and 0 <= self._active < total:
             if self._active < self._tab_offset:
                 self._tab_offset = self._active
             elif self._active >= self._tab_offset + max_cat_tabs:
@@ -4662,11 +4856,26 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             return nm[:13] + "…" if len(nm) > 14 else nm
 
         right_w = _measure("≡", False)
-        for key, label, idx in self._SYSTEM_TABS:
-            if key in self._pinned_tabs:
-                right_w += _measure(label, self._active == idx)
+        shown_pinned = [(key, label, idx) for key, label, idx in self._SYSTEM_TABS
+                        if key in self._pinned_tabs]
+        for key, label, idx in shown_pinned:
+            right_w += _measure(label, self._active == idx)
         ctrl_w = (_measure("◀", False) + _measure("▶", False)
                   + _measure("+", False))
+        # When the bar is too cramped (narrow window / 150% DPI scaling),
+        # pack silently squeezes out the category pills and the ▶ button —
+        # the bar's primary controls. Drop pinned system pills (all tabs stay
+        # reachable via the ≡ menu) until one readable category pill plus the
+        # arrows fit; the active system tab always keeps its pill.
+        min_cat = _measure("MMMMM", False)
+        while shown_pinned and win_w - right_w - ctrl_w - 10 < min_cat:
+            for j in range(len(shown_pinned) - 1, -1, -1):
+                if shown_pinned[j][2] != self._active:
+                    right_w -= _measure(shown_pinned[j][1], False)
+                    shown_pinned.pop(j)
+                    break
+            else:
+                break   # only the active system pill is left: keep it
         budget = max(60, win_w - right_w - ctrl_w - 10)
 
         def _fit_end(start):
@@ -4680,7 +4889,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             return e
 
         end = _fit_end(self._tab_offset)
-        if 0 <= self._active < total and self._active >= end:
+        if not keep_scroll and 0 <= self._active < total and self._active >= end:
             # active pill didn't fit: scroll so it becomes the first one
             self._tab_offset = self._active
             end = _fit_end(self._tab_offset)
@@ -4796,9 +5005,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._menu_btn.pack(side="right")
 
         # show only pinned system tabs (packed in reverse order from the right)
-        for key, label, idx in reversed(self._SYSTEM_TABS):
-            if key not in self._pinned_tabs:
-                continue
+        for key, label, idx in reversed(shown_pinned):
             is_active = (self._active == idx)
             _pill(
                 self._tab_bar, label, is_active,
@@ -4886,14 +5093,14 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         elif self._active == -2:
             self._footer_btn.configure(text="+ Add Task", command=self._add_task)
             self._footer_btn2.pack_forget()
-            self._footer_btn3.pack(side="left", fill="x", expand=True, padx=(2, 0))
+            self._footer_btn3.pack(side="left", fill="x", expand=True, padx=(4, 0))
         elif self._active == -3:
             self._footer_btn.configure(text="+ Add Notification", command=self._add_notify_item)
             self._footer_btn2.pack_forget()
         elif self._active == -4:
             self._footer_btn.configure(text="+ Add Bookmark", command=self._add_bookmark)
             self._footer_btn2.configure(text="+ Add Category", command=self._add_bm_category)
-            self._footer_btn2.pack(side="left", fill="x", expand=True, padx=(2, 0))
+            self._footer_btn2.pack(side="left", fill="x", expand=True, padx=(4, 0))
         elif self._active == -9:
             self._footer_btn.configure(text="+ Add Rule", command=self._add_rule)
             self._footer_btn2.pack_forget()
@@ -4907,7 +5114,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         else:
             self._footer_btn.configure(text="+ Add Folder", command=self._add_folder)
             self._footer_btn2.configure(text="+ Add File", command=self._add_file)
-            self._footer_btn2.pack(side="left", fill="x", expand=True, padx=(2, 0))
+            self._footer_btn2.pack(side="left", fill="x", expand=True, padx=(4, 0))
 
     def _show_tabs_menu(self):
         """Show the drop-down menu for the ≡ button."""
@@ -4973,12 +5180,12 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
     def _scroll_tabs_left(self):
         """Scroll the category tabs to the left."""
         self._tab_offset = max(0, self._tab_offset - 1)
-        self._render_tabs()
+        self._render_tabs(keep_scroll=True)
 
     def _scroll_tabs_right(self):
         """Scroll the category tabs to the right."""
         self._tab_offset = min(len(self._data) - 1, self._tab_offset + 1)
-        self._render_tabs()
+        self._render_tabs(keep_scroll=True)
 
     def _unpin_tab(self, key: str):
         """Unpin a tab from the tab bar via right-click."""
@@ -5159,10 +5366,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         else:
             outer.pack(fill="x", pady=(1 if size == "compact" else PAD_ROW_Y),
                        padx=PAD_ROW_X)
-        card = tk.Frame(outer, bg=C["card"],
-                        pady=pad_y, padx=pad_x, relief="flat", bd=0,
-                        highlightthickness=1, highlightbackground=C["border"])
-        card.pack(fill="both", expand=True)
+        R = {"compact": 8, "normal": 10, "large": 12}.get(size, 10)
+        plate, card, _plate_redraw = _rounded_card(outer, radius=R,
+                                                   pad_x=pad_x, pad_y=pad_y)
 
         _make_type_glyph(card, _item_kind(path, item_type),
                          C["card"]).pack(side="left", padx=(0, 2))
@@ -5207,11 +5413,11 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
         def _on_enter(e, f=card):
             _set_bg(f, C["card_h"])
-            f.configure(highlightbackground=C["accent"])
+            _plate_redraw(fill=C["card_h"], outline=C["accent"])
 
         def _on_leave(e, f=card):
             _set_bg(f, C["card"])
-            f.configure(highlightbackground=C["border"])
+            _plate_redraw(fill=C["card"], outline=C["border"])
 
         # Click = open, drag ≥6px = reorder. Tk's implicit grab keeps
         # sending B1-Motion to the pressed widget, so drop targets are
@@ -5262,12 +5468,13 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             for child in w.winfo_children():
                 _bind_open(child)
 
-        _bind_open(card)
-        self._card_frames.append(card)
+        _bind_open(plate)   # covers card + children; corners stay clickable
+        self._card_frames.append(plate)
 
         # Show hovered path in the bottom status bar
-        card.bind("<Enter>", lambda e: self._pathbar_var.set(path), add="+")
-        card.bind("<Leave>", lambda e: self._pathbar_var.set(""),   add="+")
+        for _w in (plate, card):
+            _w.bind("<Enter>", lambda e: self._pathbar_var.set(path), add="+")
+            _w.bind("<Leave>", lambda e: self._pathbar_var.set(""),   add="+")
         for child in tuple(card.winfo_children()):
             if child not in extra_btns:
                 child.bind("<Enter>", lambda e, p=path: self._pathbar_var.set(p), add="+")
@@ -5290,9 +5497,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         if idx is None or not (0 <= idx < len(self._card_frames)):
             return
         try:
-            self._card_frames[idx].configure(
-                highlightbackground=C["accent"] if on else C["border"],
-                highlightthickness=2 if on else 1)
+            self._card_frames[idx]._redraw(
+                outline=C["accent"] if on else C["border"],
+                ow=2 if on else 1)
         except tk.TclError:
             pass
 
@@ -6925,11 +7132,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         # (with placeholder) and a pill-shaped add button. Type a task and
         # press Enter to add instantly; the full TaskDialog stays for details.
         qa_outer = tk.Frame(self._list_frame, bg=C["bg"])
-        qa_outer.pack(fill="x", padx=4, pady=(6, 4))
+        qa_outer.pack(fill="x", padx=6, pady=(6, 4))
 
-        card = tk.Frame(qa_outer, bg=C["card"],
-                        highlightthickness=1, highlightbackground=C["border"])
-        card.pack(fill="x")
+        _qa_plate, card, _qa_redraw = _rounded_card(qa_outer, radius=12)
 
         existing_events = self._event_names()
         default_event = (getattr(self, "_task_quick_event", "")
@@ -6947,6 +7152,30 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
         # thin vertical divider between the event selector and the entry
         tk.Frame(card, bg=C["border"], width=1).pack(side="left", fill="y", pady=7)
+
+        # ── pill-shaped add button (rounded canvas) ──
+        # packed before the entry so a narrow window shrinks the entry,
+        # never clips the button (pack squeezes the most recently packed)
+        _btxt  = "+ Add"
+        _bfont = FONT_SMALL_BOLD
+        _bm    = tkfont.Font(family=_bfont[0], size=_bfont[1], weight="bold")
+        _bw    = _bm.measure(_btxt) + 26
+        _bh    = _bm.metrics("linespace") + 12
+        add_cv = tk.Canvas(card, width=_bw, height=_bh, bg=C["card"],
+                           highlightthickness=0, cursor="hand2")
+        add_cv.pack(side="right", padx=(0, 8), pady=6)
+
+        def _draw_add(fill):
+            add_cv.delete("all")
+            _draw_rounded_rect(add_cv, 0, 0, _bw, _bh, min(_bh // 2, 12),
+                               fill=fill, outline="")
+            add_cv.create_text(_bw // 2, _bh // 2, text=_btxt,
+                               font=_bfont, fill="white")
+
+        _draw_add(C["accent"])
+        add_cv.bind("<Button-1>", lambda e: _quick_add())  # defined below
+        add_cv.bind("<Enter>",    lambda e: _draw_add(C["accent_dk"]))
+        add_cv.bind("<Leave>",    lambda e: _draw_add(C["accent"]))
 
         content_entry = tk.Entry(card, textvariable=qa_content, font=FONT,
                                  bg=C["card"], fg=C["text"], relief="flat", bd=0,
@@ -6976,12 +7205,12 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         content_entry.bind("<FocusIn>", _clear_ph, add="+")
         content_entry.bind("<FocusOut>", _restore_ph, add="+")
 
-        # ── focus ring: highlight the card border while editing ──
+        # ── focus ring: highlight the rounded outline while editing ──
         def _focus_on(_e=None):
-            card.configure(highlightbackground=C["accent"])
+            _qa_redraw(outline=C["accent"], ow=2)
 
         def _focus_off(_e=None):
-            card.configure(highlightbackground=C["border"])
+            _qa_redraw(outline=C["border"], ow=1)
 
         for w in (ev_cb, content_entry):
             w.bind("<FocusIn>",  _focus_on,  add="+")
@@ -7015,28 +7244,6 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
         content_entry.bind("<Return>", _quick_add)
         ev_cb.bind("<Return>", lambda e: content_entry.focus_set())
-
-        # ── pill-shaped add button (rounded canvas) ──
-        _btxt  = "+ Add"
-        _bfont = FONT_SMALL_BOLD
-        _bm    = tkfont.Font(family=_bfont[0], size=_bfont[1], weight="bold")
-        _bw    = _bm.measure(_btxt) + 26
-        _bh    = _bm.metrics("linespace") + 12
-        add_cv = tk.Canvas(card, width=_bw, height=_bh, bg=C["card"],
-                           highlightthickness=0, cursor="hand2")
-        add_cv.pack(side="left", padx=(0, 8), pady=6)
-
-        def _draw_add(fill):
-            add_cv.delete("all")
-            _draw_rounded_rect(add_cv, 0, 0, _bw, _bh, min(_bh // 2, 12),
-                               fill=fill, outline="")
-            add_cv.create_text(_bw // 2, _bh // 2, text=_btxt,
-                               font=_bfont, fill="white")
-
-        _draw_add(C["accent"])
-        add_cv.bind("<Button-1>", lambda e: _quick_add())
-        add_cv.bind("<Enter>",    lambda e: _draw_add(C["accent_dk"]))
-        add_cv.bind("<Leave>",    lambda e: _draw_add(C["accent"]))
 
         if getattr(self, "_task_quick_focus", False):
             self._task_quick_focus = False
@@ -8178,6 +8385,66 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         threading.Thread(target=self._weather_fetch, daemon=True).start()
         self._weather_after_id = self.after(30 * 60_000, self._weather_start)
 
+    def _attach_tip(self, widget, text_fn):
+        """Attach a small hover tooltip; text_fn() returns the text ("" = no tip)."""
+        st = {"win": None, "after": None}
+
+        def _show():
+            st["after"] = None
+            txt = text_fn()
+            if not txt or st["win"] is not None or not widget.winfo_ismapped():
+                return
+            win = tk.Toplevel(self)
+            win.overrideredirect(True)
+            win.attributes("-topmost", True)
+            win.configure(bg=C["border"])   # 1px border via padded inner label
+            tk.Label(win, text=txt, justify="left",
+                     bg=C["card"], fg=C["text"], font=FONT_SMALL,
+                     padx=8, pady=4).pack(padx=1, pady=1)
+            win.geometry(f"+{widget.winfo_rootx()}"
+                         f"+{widget.winfo_rooty() + widget.winfo_height() + 4}")
+            st["win"] = win
+
+        def _hide(_e=None):
+            if st["after"] is not None:
+                try:
+                    self.after_cancel(st["after"])
+                except Exception:
+                    pass
+                st["after"] = None
+            if st["win"] is not None:
+                try:
+                    st["win"].destroy()
+                except Exception:
+                    pass
+                st["win"] = None
+
+        widget.bind("<Enter>", lambda e: st.__setitem__(
+            "after", self.after(400, _show)), add="+")
+        widget.bind("<Leave>", _hide, add="+")
+        widget.bind("<ButtonPress>", _hide, add="+")
+
+    def _weather_tip_text(self) -> str:
+        """Hover text for the header weather readout (diagnostics)."""
+        lines = [f"Weather: {self._weather_city or 'off'}"]
+        upd = getattr(self, "_weather_updated", None)
+        lines.append("Updated: " + (upd.strftime("%H:%M") if upd else "never"))
+        err = getattr(self, "_weather_err", "")
+        if err:
+            lines.append(f"Last error: {err}")
+        lines.append("Click to refresh")
+        return "\n".join(lines)
+
+    def _weather_urlopen(self, url_or_req, timeout: int = 10):
+        """urlopen honoring the configured proxy ("" = system settings)."""
+        import urllib.request
+        proxy = getattr(self, "_weather_proxy", "").strip()
+        if proxy:
+            opener = urllib.request.build_opener(
+                urllib.request.ProxyHandler({"http": proxy, "https": proxy}))
+            return opener.open(url_or_req, timeout=timeout)
+        return urllib.request.urlopen(url_or_req, timeout=timeout)
+
     def _weather_fetch(self):
         """Worker thread: geocode the city once, then read current conditions."""
         import urllib.request
@@ -8191,13 +8458,13 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                     req = urllib.request.Request(
                         "https://ipapi.co/json/",
                         headers={"User-Agent": "gem-launcher/1.0"})
-                    with urllib.request.urlopen(req, timeout=10) as r:
+                    with self._weather_urlopen(req) as r:
                         hit = json.loads(r.read().decode("utf-8"))
                 else:
                     q = urllib.parse.quote(city)
-                    with urllib.request.urlopen(
+                    with self._weather_urlopen(
                             "https://geocoding-api.open-meteo.com/v1/search"
-                            f"?name={q}&count=1", timeout=10) as r:
+                            f"?name={q}&count=1") as r:
                         res = json.loads(r.read().decode("utf-8"))
                     hit = (res.get("results") or [{}])[0]
                 if "latitude" not in hit:
@@ -8205,22 +8472,45 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 geo = (city, hit["latitude"], hit["longitude"])
                 self._weather_geo = geo
             _, lat, lon = geo
-            with urllib.request.urlopen(
+            with self._weather_urlopen(
                     "https://api.open-meteo.com/v1/forecast"
                     f"?latitude={lat}&longitude={lon}"
-                    "&current=temperature_2m,weather_code", timeout=10) as r:
+                    "&current=temperature_2m,weather_code") as r:
                 cur = json.loads(r.read().decode("utf-8")).get("current", {})
             temp = cur.get("temperature_2m")
             if temp is None:
                 raise ValueError("no temperature")
             state = (self._weather_kind(int(cur.get("weather_code", 3))),
                      f"{round(temp)}°")
-        except Exception:
-            state = None   # offline / unknown city: hide instead of erroring
+            err = ""
+        except Exception as exc:
+            state = None   # offline / unknown city: handled in _weather_done
+            err = f"{type(exc).__name__}: {exc}"[:120]
         try:
-            self.after(0, lambda: self._weather_apply(state))   # back to Tk thread
+            self.after(0, lambda: self._weather_done(state, err))  # to Tk thread
         except Exception:
             pass
+
+    def _weather_done(self, state: tuple[str, str] | None, err: str = ""):
+        """Tk thread: apply a fetch result. A failed fetch keeps the last
+        reading on screen (up to ~30 min) and retries in 5 min instead of
+        blanking the readout until the next 30-min cycle."""
+        self._weather_err = err   # shown in the hover tooltip / settings menu
+        if state is not None:
+            self._weather_fail = 0
+            self._weather_updated = datetime.datetime.now()
+            self._weather_apply(state)
+            return
+        self._weather_fail = getattr(self, "_weather_fail", 0) + 1
+        if self._weather_fail > 6 or not self._weather_state:
+            self._weather_apply(None)   # persistently offline: hide
+        if self._weather_city:
+            if getattr(self, "_weather_after_id", None) is not None:
+                try:
+                    self.after_cancel(self._weather_after_id)
+                except Exception:
+                    pass
+            self._weather_after_id = self.after(5 * 60_000, self._weather_start)
 
     # ── Break reminder ────────────────────────────────────
 
@@ -8990,7 +9280,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                          anchor="w").pack(fill="x", padx=4, pady=(8, 4))
 
         tk.Button(win, text="Close", command=win.destroy,
-                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]), relief="flat", bd=0,
                   font=FONT, cursor="hand2", padx=16, pady=4,
                   activebackground=C["border"], activeforeground=C["text"],
                   ).pack(pady=(0, 10))
@@ -9067,7 +9357,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
         _refresh()
         tk.Button(dlg, text="Close", command=dlg.destroy,
-                  bg=C["accent_lt"], fg=C["text"], relief="flat", bd=0,
+                  bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]), relief="flat", bd=0,
                   font=FONT, cursor="hand2", padx=16, pady=4,
                   activebackground=C["border"], activeforeground=C["text"],
                   ).pack(pady=(0, 12))
@@ -9318,7 +9608,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         _lb_btn_cfg = dict(relief="flat", bd=0, font=FONT_SMALL,
                            cursor="hand2", padx=6)
         new_btn = tk.Button(lb_btn, text="+ New",
-                            bg=C["accent_lt"], fg=C["text"],
+                            bg=C["accent_lt"], fg=_ink_on(C["accent_lt"]),
                             activebackground=C["border"], **_lb_btn_cfg)
         new_btn.pack(side="left", padx=(0, 2))
         del_btn = tk.Button(lb_btn, text="Delete",
@@ -9676,6 +9966,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             self.configure(bg=C["bg"])
             self._build_ui()
             self._render_tabs()
+            self._update_footer()   # footer buttons depend on the active tab
             self._render_list()
             _apply_titlebar_theme(self)
         self._fade_transition(_do_rebuild)
@@ -9989,8 +10280,23 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 # ── Utilities ─────────────────────────────────────────────
 
 def _hover(widget, on_color, off_color):
-    widget.bind("<Enter>", lambda e: widget.config(bg=on_color))
-    widget.bind("<Leave>", lambda e: widget.config(bg=off_color))
+    try:
+        base_fg = str(widget.cget("fg"))
+    except Exception:
+        base_fg = None   # no fg option (e.g. Frame): bg-only hover
+
+    def _apply(bg):
+        if base_fg is None:
+            widget.config(bg=bg)
+            return
+        # keep the widget's own fg unless it would wash out on this fill
+        fg = (base_fg
+              if abs(_luma(base_fg, widget) - _luma(bg, widget)) >= 80
+              else _ink_on(bg))
+        widget.config(bg=bg, fg=fg)
+
+    widget.bind("<Enter>", lambda e: _apply(on_color))
+    widget.bind("<Leave>", lambda e: _apply(off_color))
 
 def _set_bg(frame: tk.Frame, color: str):
     frame.configure(bg=color)
