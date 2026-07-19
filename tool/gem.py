@@ -536,21 +536,9 @@ def _draw_weather_icon(cv: tk.Canvas, kind: str, k: float = 1.0):
 
 
 def _render_empty_state(parent, title: str, hint: str):
-    """Friendly placeholder for an empty list: soft glyph + title + hint."""
+    """Friendly placeholder for an empty list: title + hint."""
     box = tk.Frame(parent, bg=C["bg"])
     box.pack(expand=True, pady=30)
-    # big soft folder with sparkles (canvas-drawn, no emoji fonts)
-    cv = tk.Canvas(box, width=72, height=56, bg=C["bg"], highlightthickness=0)
-    cv.pack(pady=(0, 10))
-    soft  = _blend_hex(C["accent"], C["bg"], 0.55)
-    front = _blend_hex(C["accent"], C["bg"], 0.38)
-    spark = _blend_hex(C["accent"], C["bg"], 0.25)
-    cv.create_rectangle(14, 12, 34, 22, fill=soft, outline="")   # folder tab
-    _draw_rounded_rect(cv, 14, 16, 58, 48, 7, fill=soft)         # body (back)
-    _draw_rounded_rect(cv, 14, 24, 58, 48, 7, fill=front)        # front flap
-    for sx, sy, sr in ((63, 14, 4), (8, 30, 3), (64, 34, 2)):    # sparkles
-        cv.create_line(sx - sr, sy, sx + sr, sy, fill=spark, width=2)
-        cv.create_line(sx, sy - sr, sx, sy + sr, fill=spark, width=2)
     tk.Label(box, text=title, bg=C["bg"], fg=C["text"],
              font=FONT_BOLD).pack(pady=(0, 3))
     tk.Label(box, text=hint, bg=C["bg"], fg=C["text_sub"],
@@ -1097,6 +1085,53 @@ def _mask_snowflake(md, S):
             md.line([(bx, by), (ex, ey)], fill=255, width=w_br)
 
 
+def _mask_cat(md, S):
+    # pointy ears first, round head on top so the inner edges stay clean
+    md.polygon([(S * 0.16, S * 0.46), (S * 0.22, S * 0.08), (S * 0.48, S * 0.30)],
+               fill=255)
+    md.polygon([(S * 0.84, S * 0.46), (S * 0.78, S * 0.08), (S * 0.52, S * 0.30)],
+               fill=255)
+    md.ellipse([S * 0.13, S * 0.24, S * 0.87, S * 0.92], fill=255)
+
+
+def _mask_bunny(md, S):
+    md.ellipse([S * 0.23, S * 0.05, S * 0.44, S * 0.54], fill=255)   # left ear
+    md.ellipse([S * 0.56, S * 0.05, S * 0.77, S * 0.54], fill=255)   # right ear
+    md.ellipse([S * 0.15, S * 0.38, S * 0.85, S * 0.94], fill=255)   # head
+
+
+def _mask_bear(md, S):
+    md.ellipse([S * 0.08, S * 0.08, S * 0.38, S * 0.38], fill=255)   # left ear
+    md.ellipse([S * 0.62, S * 0.08, S * 0.92, S * 0.38], fill=255)   # right ear
+    md.ellipse([S * 0.11, S * 0.20, S * 0.89, S * 0.93], fill=255)   # head
+
+
+def _mask_chick(md, S):
+    md.ellipse([S * 0.08, S * 0.34, S * 0.72, S * 0.92], fill=255)   # body
+    md.ellipse([S * 0.38, S * 0.08, S * 0.80, S * 0.50], fill=255)   # head
+    md.polygon([(S * 0.76, S * 0.22), (S * 0.95, S * 0.30),
+                (S * 0.76, S * 0.38)], fill=255)                     # beak
+    md.polygon([(S * 0.18, S * 0.52), (S * 0.02, S * 0.38),
+                (S * 0.26, S * 0.42)], fill=255)                     # tail tuft
+
+
+def _mask_fish(md, S):
+    md.ellipse([S * 0.06, S * 0.28, S * 0.70, S * 0.74], fill=255)   # body
+    md.polygon([(S * 0.62, S * 0.51), (S * 0.94, S * 0.22),
+                (S * 0.94, S * 0.80)], fill=255)                     # tail
+    md.polygon([(S * 0.26, S * 0.34), (S * 0.38, S * 0.12),
+                (S * 0.52, S * 0.32)], fill=255)                     # dorsal fin
+
+
+def _mask_butterfly(md, S):
+    md.ellipse([S * 0.04, S * 0.08, S * 0.48, S * 0.56], fill=255)   # upper wings
+    md.ellipse([S * 0.52, S * 0.08, S * 0.96, S * 0.56], fill=255)
+    md.ellipse([S * 0.12, S * 0.42, S * 0.48, S * 0.84], fill=255)   # lower wings
+    md.ellipse([S * 0.52, S * 0.42, S * 0.88, S * 0.84], fill=255)
+    md.rounded_rectangle([S * 0.43, S * 0.12, S * 0.57, S * 0.82],
+                         radius=int(S * 0.07), fill=255)             # body
+
+
 _ICON_MASKS = {
     "rounded": _mask_rounded,
     "ring":    _mask_ring,
@@ -1113,6 +1148,12 @@ _ICON_MASKS = {
     "bolt":      _mask_bolt,
     "ribbon":    _mask_ribbon,
     "snowflake": _mask_snowflake,
+    "cat":       _mask_cat,
+    "bunny":     _mask_bunny,
+    "bear":      _mask_bear,
+    "chick":     _mask_chick,
+    "fish":      _mask_fish,
+    "butterfly": _mask_butterfly,
 }
 
 # Selectable icon designs (key, label) shown in the settings menu.
@@ -1133,6 +1174,12 @@ ICON_SHAPES = [
     ("bolt",      "Bolt"),
     ("ribbon",    "Ribbon"),
     ("snowflake", "Snowflake"),
+    ("cat",       "Cat"),
+    ("bunny",     "Bunny"),
+    ("bear",      "Bear"),
+    ("chick",     "Chick"),
+    ("fish",      "Fish"),
+    ("butterfly", "Butterfly"),
 ]
 
 
@@ -3031,15 +3078,23 @@ def _get_monitor_work_area(widget: tk.Misc) -> tuple[int, int, int, int]:
         return 0, 0, widget.winfo_screenwidth(), widget.winfo_screenheight()
 
 class NotificationPopup(tk.Toplevel):
-    """Bottom-right fade-in notification popup with progress bar"""
+    """Bottom-right notification popup: accent stripe + Win11 rounded
+    corners, snooze buttons, hover pauses the countdown, and multiple
+    popups stack upward instead of overlapping."""
 
     FADE_MS    = 350    # fade in/out duration (ms)
     FADE_STEPS = 14     # number of fade steps
     SLIDE_PX   = 46     # horizontal slide-in distance (px)
+    STACK_GAP  = 10     # vertical gap between stacked popups (px)
 
-    def __init__(self, parent, task: dict, display_ms: int = 8000):
+    _stack: list = []   # open popups, oldest first (bottom-most on screen)
+
+    def __init__(self, parent, task: dict, display_ms: int = 8000,
+                 on_missed=None):
         super().__init__(parent)
+        self._task       = task
         self._display_ms = display_ms
+        self._on_missed  = on_missed   # fired once if the popup times out unseen
         self.overrideredirect(True)
         self.attributes("-topmost", True)
         self.attributes("-alpha", 0.0)
@@ -3051,7 +3106,8 @@ class NotificationPopup(tk.Toplevel):
             sched      = datetime.datetime.fromisoformat(sched_str)
             delta_min  = int((sched - datetime.datetime.now()).total_seconds() / 60)
             time_str   = f"{sched.month}/{sched.day}  {sched.strftime('%H:%M')}"
-            remain_str = f"in {delta_min} min"
+            remain_str = (f"in {delta_min} min" if delta_min >= 0
+                          else f"{-delta_min} min ago")
         except (ValueError, TypeError):
             time_str   = sched_str
             remain_str = ""
@@ -3062,118 +3118,184 @@ class NotificationPopup(tk.Toplevel):
         # ── main container (2px border padding) ──
         inner = tk.Frame(self, bg=C["card"])
         inner.pack(fill="both", expand=True, padx=2, pady=2)
+        # accent stripe down the left edge
+        tk.Frame(inner, bg=C["accent"], width=4).pack(side="left", fill="y")
+        body = tk.Frame(inner, bg=C["card"])
+        body.pack(side="left", fill="both", expand=True)
 
-        # ── header strip ──────────────────────────────────
-        hdr = tk.Frame(inner, bg=C["accent_lt"])
-        hdr.pack(fill="x")
-
-        # left: "Notify" label + recurrence badge
-        hdr_l = tk.Frame(hdr, bg=C["accent_lt"])
-        hdr_l.pack(side="left", padx=(10, 4), pady=(7, 5))
-        tk.Label(hdr_l, text="Notify",
-                 bg=C["accent_lt"], fg=C["accent_dk"],
+        # ── header row ─────────────────────────────────────
+        hdr = tk.Frame(body, bg=C["card"])
+        hdr.pack(fill="x", padx=(12, 8), pady=(8, 5))
+        tk.Label(hdr, text="Notify", bg=C["card"], fg=C["accent_dk"],
                  font=FONT_SMALL_BOLD).pack(side="left")
         if recur_text:
-            tk.Label(hdr_l, text=recur_text,
-                     bg=C["accent"], fg="white",
+            tk.Label(hdr, text=recur_text,
+                     bg=C["accent_lt"], fg=C["accent_dk"],
                      font=FONT_SMALL_BOLD,
                      padx=5, pady=1).pack(side="left", padx=(6, 0))
 
-        # right: decorative circles + close button
-        hdr_r = tk.Frame(hdr, bg=C["accent_lt"])
-        hdr_r.pack(side="right", padx=(0, 8), pady=6)
+        close = tk.Label(hdr, text=" x ",
+                         bg=C["card"], fg=C["text_sub"],
+                         font=FONT_SMALL_BOLD, cursor="hand2")
+        close.pack(side="right")
+        close.bind("<Button-1>", lambda e: self.destroy())
+        close.bind("<Enter>",    lambda e: close.configure(bg=C["accent"], fg="white"))
+        close.bind("<Leave>",    lambda e: close.configure(bg=C["card"], fg=C["text_sub"]))
 
         # 4-point star resembling the Claude logo
-        star_cv = tk.Canvas(hdr_r, bg=C["accent_lt"], width=14, height=14,
+        star_cv = tk.Canvas(hdr, bg=C["card"], width=14, height=14,
                             highlightthickness=0)
-        star_cv.pack(side="left")
+        star_cv.pack(side="right", padx=(0, 6))
         star_cv.create_polygon(
             7, 1,  8, 6,  13, 7,  8, 8,  7, 13,  6, 8,  1, 7,  6, 6,
             fill=C["accent"], outline="",
         )
 
-        close = tk.Label(hdr_r, text=" x ",
-                         bg=C["accent_lt"], fg=C["accent_dk"],
-                         font=FONT_SMALL_BOLD, cursor="hand2")
-        close.pack(side="left", padx=(6, 0))
-        close.bind("<Button-1>", lambda e: self.destroy())
-        close.bind("<Enter>",    lambda e: close.configure(bg=C["accent"], fg="white"))
-        close.bind("<Leave>",    lambda e: close.configure(bg=C["accent_lt"], fg=C["accent_dk"]))
-
-        # thin accent line below header
-        tk.Frame(inner, bg=C["accent"], height=1).pack(fill="x")
+        # ── countdown: thin progress line under the header ──
+        self._pb = tk.Canvas(body, height=3, bg=C["accent_lt"],
+                             highlightthickness=0)
+        self._pb.pack(fill="x")
 
         # ── content area ────────────────────────────────
-        content = tk.Frame(inner, bg=C["card"])
-        content.pack(fill="both", expand=True, padx=14, pady=(10, 12))
+        title  = task.get("title", "")
+        t_font = (FONT[0], FONT[1] + 2, "bold")
+        # wrap width follows the title so short ones stay compact
+        _m = tkfont.Font(family=t_font[0], size=t_font[1], weight="bold")
+        wrap = max(260, min(380, _m.measure(title) + 10))
 
-        # title
-        title = task.get("title", "")
+        content = tk.Frame(body, bg=C["card"])
+        content.pack(fill="both", expand=True, padx=14, pady=(9, 4))
+
         tk.Label(content, text=title,
                  bg=C["card"], fg=C["text"],
-                 font=FONT_BOLD, anchor="w",
-                 wraplength=240, justify="left").pack(fill="x", pady=(0, 6))
+                 font=t_font, anchor="w",
+                 wraplength=wrap, justify="left").pack(fill="x")
 
-        # datetime pill
-        if time_str:
-            pill = tk.Frame(content, bg=C["accent_lt"])
-            pill.pack(anchor="w", pady=(0, 3))
-            tk.Label(pill, text=time_str,
-                     bg=C["accent_lt"], fg=C["accent_dk"],
-                     font=FONT_SMALL, padx=8, pady=2).pack()
-
-        # remaining time
-        if remain_str:
-            tk.Label(content, text=remain_str,
-                     bg=C["card"], fg=C["accent"],
-                     font=FONT_SMALL_BOLD, anchor="w").pack(fill="x")
+        # datetime chip + remaining time on one line
+        if time_str or remain_str:
+            trow = tk.Frame(content, bg=C["card"])
+            trow.pack(fill="x", pady=(6, 0))
+            if time_str:
+                tk.Label(trow, text=time_str,
+                         bg=C["accent_lt"], fg=C["accent_dk"],
+                         font=FONT_SMALL, padx=8, pady=2).pack(side="left")
+            if remain_str:
+                tk.Label(trow, text=remain_str,
+                         bg=C["card"], fg=C["accent"],
+                         font=FONT_SMALL_BOLD).pack(side="left", padx=(8, 0))
 
         # launch path
         open_paths = task.get("open_paths", [])
         if not open_paths and task.get("open_path"):
             open_paths = [task["open_path"]]
         if open_paths:
-            tk.Frame(content, bg=C["border"], height=1).pack(fill="x", pady=(6, 0))
+            tk.Frame(content, bg=C["border"], height=1).pack(fill="x", pady=(7, 0))
             names = "  /  ".join(os.path.basename(p) or p for p in open_paths)
             tk.Label(content, text=f"Opens: {names}",
                      bg=C["card"], fg=C["accent_dk"],
                      font=FONT_SMALL, anchor="w",
-                     wraplength=240, justify="left").pack(fill="x", pady=(4, 0))
+                     wraplength=wrap, justify="left").pack(fill="x", pady=(4, 0))
 
         # notes
         notes = task.get("notes", "")
         if notes:
-            tk.Frame(content, bg=C["border"], height=1).pack(fill="x", pady=(6, 0))
+            tk.Frame(content, bg=C["border"], height=1).pack(fill="x", pady=(7, 0))
             tk.Label(content, text=notes,
                      bg=C["card"], fg=C["text_sub"],
                      font=FONT_SMALL, anchor="w",
-                     wraplength=240, justify="left").pack(fill="x", pady=(4, 0))
+                     wraplength=wrap, justify="left").pack(fill="x", pady=(4, 0))
 
-        # ── progress bar (bottom, 6px) ──────────────────────
-        self._pb = tk.Canvas(self, height=6, bg=C["accent_lt"],
-                             highlightthickness=0)
-        self._pb.pack(fill="x", side="bottom")
+        # ── footer: snooze buttons ──────────────────────
+        foot = tk.Frame(body, bg=C["card"])
+        foot.pack(fill="x", padx=12, pady=(4, 10))
+        tk.Label(foot, text="Snooze", bg=C["card"], fg=C["text_sub"],
+                 font=FONT_TINY).pack(side="left")
+        _PillBtn(foot, text="+15m", kind="soft", font=FONT_SMALL_BOLD,
+                 padx=10, pady=3, bg=C["card"], fixed=True,
+                 command=lambda: self._snooze(15)).pack(side="right")
+        _PillBtn(foot, text="+5m", kind="soft", font=FONT_SMALL_BOLD,
+                 padx=10, pady=3, bg=C["card"], fixed=True,
+                 command=lambda: self._snooze(5)).pack(side="right", padx=(0, 5))
 
-        # ── position at bottom-right of the monitor where the app is shown ──
+        # optional notification sound (settings menu toggle on the app)
+        _snd = getattr(parent, "_notify_sound", None)
+        if _snd is not None and _snd.get():
+            try:
+                import winsound
+                winsound.MessageBeep(winsound.MB_ICONASTERISK)
+            except Exception:
+                pass
+
+        # ── position: bottom-right, stacked above earlier popups ──
         self.update_idletasks()
-        w  = max(self.winfo_reqwidth(), 280)
-        h  = max(self.winfo_reqheight(), 80)
+        w  = max(self.winfo_reqwidth(), 300)
+        h  = max(self.winfo_reqheight(), 90)
         ml, mt, mr, mb = _get_monitor_work_area(parent)
+        # NB: _w is tkinter's internal window-path attribute — don't touch it
+        self._pop_w, self._pop_h, self._mb = w, h, mb
+        NotificationPopup._stack.append(self)
         self._fx = mr - w - 20   # final position; slide in from the right
-        self._fy = mb - h - 12
+        self._fy = self._stack_y()
         self.geometry(f"{w}x{h}+{self._fx + self.SLIDE_PX}+{self._fy}")
+        self._round_corners()
 
-        # click to close
-        for widget in (self, inner, content, hdr, hdr_l, hdr_r):
+        # click to close (buttons handle their own clicks first)
+        for widget in (self, inner, body, content, hdr):
             widget.bind("<Button-1>", lambda e: self.destroy())
 
         # start animation
         self._start  = time.monotonic()
         self._pb_rect = None
+        self._paused = False
         self._anim_step = 0
         self._fade_in()
 
+    # ── stacking / snooze / Win11 corners ──────────────────
+
+    def _stack_y(self) -> int:
+        """Final y for this popup: above every earlier popup still open."""
+        stack = NotificationPopup._stack
+        idx = stack.index(self) if self in stack else len(stack)
+        off = 0
+        for p in stack[:idx]:
+            try:
+                if p.winfo_exists():
+                    off += p._pop_h + self.STACK_GAP
+            except Exception:
+                pass
+        return self._mb - 12 - off - self._pop_h
+
+    def destroy(self):
+        stack = NotificationPopup._stack
+        if self in stack:
+            stack.remove(self)
+            for p in stack:   # survivors settle back down
+                try:
+                    p._fy = p._stack_y()
+                    p.geometry(f"+{p._fx}+{p._fy}")
+                except Exception:
+                    pass
+        super().destroy()
+
+    def _snooze(self, minutes: int):
+        app, task, ms = self.master, self._task, self._display_ms
+        app.after(minutes * 60000, lambda: NotificationPopup(app, task, ms))
+        self.destroy()
+
+    def _round_corners(self):
+        """Win11 native rounded corners via DWM; silently a no-op elsewhere."""
+        try:
+            hwnd = ctypes.windll.user32.GetAncestor(self.winfo_id(), 2)  # GA_ROOT
+            ctypes.windll.dwmapi.DwmSetWindowAttribute(
+                hwnd, 33,                       # DWMWA_WINDOW_CORNER_PREFERENCE
+                ctypes.byref(ctypes.c_int(2)),  # DWMWCP_ROUND
+                ctypes.sizeof(ctypes.c_int))
+        except Exception:
+            pass
+
     def _fade_in(self):
+        if not self.winfo_exists():
+            return   # closed by a click while still fading in
         # slide in from the right (ease-out) while fading in
         self._anim_step += 1
         k = min(1.0, self._anim_step / self.FADE_STEPS)
@@ -3185,7 +3307,7 @@ class NotificationPopup(tk.Toplevel):
         else:
             pw = max(self._pb.winfo_width(), self.winfo_width())
             self._pb_rect = self._pb.create_rectangle(
-                0, 0, pw, 6,
+                0, 0, pw, 3,
                 fill=C["accent"], outline="",
             )
             self._tick_progress()
@@ -3193,16 +3315,37 @@ class NotificationPopup(tk.Toplevel):
     def _tick_progress(self):
         if not self.winfo_exists():
             return
+        # hovering pauses the countdown (bar turns muted while held)
+        try:
+            px, py = self.winfo_pointerxy()
+            inside = (self.winfo_rootx() <= px < self.winfo_rootx() + self.winfo_width()
+                      and self.winfo_rooty() <= py < self.winfo_rooty() + self.winfo_height())
+        except tk.TclError:
+            return
+        if inside:
+            self._start += 0.05   # push the deadline back one tick
+        if inside != self._paused:
+            self._paused = inside
+            self._pb.itemconfigure(
+                self._pb_rect, fill=C["border"] if inside else C["accent"])
         elapsed = time.monotonic() - self._start - self.FADE_MS / 1000
         frac    = max(0.0, 1.0 - elapsed / (self._display_ms / 1000))
         pw      = max(self._pb.winfo_width(), self.winfo_width())
-        self._pb.coords(self._pb_rect, 0, 0, int(pw * frac), 6)
+        self._pb.coords(self._pb_rect, 0, 0, int(pw * frac), 3)
         if frac > 0:
             self.after(50, self._tick_progress)
         else:
             self._fade_out()
 
     def _fade_out(self):
+        if not self.winfo_exists():
+            return   # closed by a click while fading out
+        if self._on_missed is not None:   # reached only via timeout, not clicks
+            cb, self._on_missed = self._on_missed, None
+            try:
+                cb(self._task)
+            except Exception:
+                pass
         # slide back toward the edge (ease-in) while fading out
         a = float(self.attributes("-alpha")) - 1.0 / self.FADE_STEPS
         self.attributes("-alpha", max(0.0, a))
@@ -3905,9 +4048,11 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._active: int = 0   # -1=Terminal, -2=Tasks, -3=Notify, -4=Web
         self._pinned_tabs: list[str] = list(self._DEFAULT_PINS)
         self._tab_offset: int = 0   # category tab scroll position
-        self._work_active: dict | None = None  # {"task_idx": int, "start": datetime}
+        self._work_active: dict | None = None  # {"task": task dict, "start": datetime}
         self._tray_icon: pystray.Icon | None = None
         self._tray_notify_pending: bool = False  # unread notification while minimized to tray
+        self._missed_notifies: list[dict] = []   # popups that timed out unseen (this session)
+        self._undo_restore = None                # restore closure for the last deletion
         self._work_anim_id = None
         self._work_anim_dots = 0
         self._work_bar_lbl: tk.Label | None = None
@@ -3959,6 +4104,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._grep_cancel:  bool = False
         self._log_tail_file: str | None = None  # Console tab: selected log filename
         self._log_tail_pos:  int = 0            # Console tab: byte offset already read
+        self._mini_win: tk.Toplevel | None = None  # mini-mode floating mascot
 
         self._restore_geometry()
         self._build_ui()
@@ -3974,6 +4120,15 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self.after(600, self._show_startup_summary)
         self._check_recurring_tasks()
         self.bind("<Control-k>", self._open_command_palette)
+        self.bind("<Control-p>", self._open_command_palette)
+        self.bind("<Control-m>", lambda e: self._enter_mini_mode())
+        self.bind("/", self._palette_key_open)   # open-only, never toggles shut
+        self.bind("<Control-Tab>",       lambda e: self._cycle_tab(1))
+        self.bind("<Control-Shift-Tab>", lambda e: self._cycle_tab(-1))
+        for _n in range(1, 10):
+            self.bind(f"<Control-Key-{_n}>",
+                      lambda e, n2=_n: self._goto_tab_n(n2 - 1))
+        self.bind("<Control-z>", self._undo_last)
         self._setup_win_integration()
         # deferred: the WM frame window exists only after mapping
         self.after(50, lambda: _apply_titlebar_theme(self))
@@ -4016,6 +4171,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 self._data = [{"category": "General", "folders": []}]
                 self._banner_enabled_cfg = True
                 self._notify_display_sec_cfg = 8
+                self._notify_sound_cfg = True
                 self._topmost_cfg = False
                 self._alpha_cfg = 1.0
                 self._card_size = "normal"
@@ -4033,6 +4189,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 self._hud_enabled = True
                 self._hud_show_text = True
                 self._min_to_tray_cfg = True
+                self._startup_summary_cfg = False
+                self._mini_pos = ""
+                self._mini_icon_px = 48
                 self._break_min = 0
                 self._weather_city = ""
                 self._weather_proxy = ""
@@ -4087,7 +4246,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                         and t.get("process") == aw.get("process")):
                     try:
                         self._work_active = {
-                            "task_idx": i,
+                            "task": t,
                             "start": datetime.datetime.fromisoformat(aw["start"]),
                         }
                     except (KeyError, ValueError):
@@ -4105,6 +4264,12 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
         # minimize (_) sends the window to the tray; off = stay in taskbar
         self._min_to_tray_cfg = bool(cfg.get("minimize_to_tray", True))
+        self._startup_summary_cfg = bool(cfg.get("startup_summary", False))
+        self._mini_pos = str(cfg.get("mini_pos", ""))
+        try:
+            self._mini_icon_px = max(24, min(128, int(cfg.get("mini_size", 48))))
+        except (TypeError, ValueError):
+            self._mini_icon_px = 48
 
         # break reminder interval in minutes (0 = off)
         try:
@@ -4119,10 +4284,15 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         # urllib cannot discover on its own
         self._weather_proxy = str(cfg.get("weather_proxy", "") or "")
 
-        # command palette: use counts for most-used-first ordering
+        # command palette: [use count, last-used epoch] per item; older
+        # configs stored a bare count — normalize to the pair form
         try:
-            self._palette_freq = {str(k): int(v)
-                                  for k, v in dict(cfg.get("palette_freq", {})).items()}
+            self._palette_freq = {}
+            for k, v in dict(cfg.get("palette_freq", {})).items():
+                if isinstance(v, (list, tuple)) and len(v) >= 2:
+                    self._palette_freq[str(k)] = [int(v[0]), float(v[1])]
+                else:
+                    self._palette_freq[str(k)] = [int(v), 0.0]
         except (TypeError, ValueError):
             self._palette_freq = {}
 
@@ -4135,6 +4305,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         # banner display settings
         self._banner_enabled_cfg: bool = cfg.get("banner_enabled", True)
         self._notify_display_sec_cfg: int = cfg.get("notify_display_sec", 8)
+        self._notify_sound_cfg: bool = cfg.get("notify_sound", True)
         self._topmost_cfg: bool = cfg.get("topmost", False)
         self._alpha_cfg: float = float(cfg.get("alpha", 1.0))
         self._card_size: str = cfg.get("card_size", "normal")
@@ -4203,6 +4374,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             "notifications":   self._notify_items,
             "banner_enabled":      self._banner_enabled.get() if hasattr(self, "_banner_enabled") else True,
             "notify_display_sec":  self._notify_display_sec.get() if hasattr(self, "_notify_display_sec") else 8,
+            "notify_sound":        self._notify_sound.get() if hasattr(self, "_notify_sound") else True,
             "theme":           self._theme,
             "icon_shape":      getattr(self, "_icon_shape", "jelly"),
             "geometry":        getattr(self, "_geometry_cfg", ""),
@@ -4212,13 +4384,17 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             "hud_enabled":     getattr(self, "_hud_enabled", True),
             "hud_show_text":   getattr(self, "_hud_show_text", True),
             "minimize_to_tray": getattr(self, "_min_to_tray_cfg", True),
+            "startup_summary": getattr(self, "_startup_summary_cfg", False),
+            "mini_pos":        getattr(self, "_mini_pos", ""),
+            "mini_size":       getattr(self, "_mini_icon_px", 48),
             "break_reminder_min": getattr(self, "_break_min", 0),
             "weather_city":    getattr(self, "_weather_city", ""),
             "weather_proxy":   getattr(self, "_weather_proxy", ""),
             # keep only the 200 most-used entries so the file stays small
             "palette_freq":    dict(sorted(
                 getattr(self, "_palette_freq", {}).items(),
-                key=lambda kv: -kv[1])[:200]),
+                key=lambda kv: -(kv[1][0] if isinstance(kv[1], (list, tuple))
+                                 else kv[1]))[:200]),
             "topmost":         self.attributes("-topmost"),
             "alpha":           self.attributes("-alpha"),
             "card_size":       self._card_size,
@@ -4413,13 +4589,14 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
     def _apply_header_bp(self, bp: str):
         """Show/hide header extras that don't fit at narrow widths."""
-        btn = getattr(self, "_shot_btn", None)
-        if btn is None:
-            return
-        if bp == "xs":
-            btn.pack_forget()
-        elif not btn.winfo_ismapped():
-            btn.pack(side="right", padx=(0, 2))
+        for name in ("_shot_btn", "_mini_btn"):
+            btn = getattr(self, name, None)
+            if btn is None:
+                continue
+            if bp == "xs":
+                btn.pack_forget()
+            elif not btn.winfo_ismapped():
+                btn.pack(side="right", padx=(0, 2))
 
     # ── UI construction ───────────────────────────────────
 
@@ -4471,13 +4648,14 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             _w.bind("<Button-3>", self._hud_context_menu)
 
 
-        # Banner notification label
+        # Banner notification label (click: replay missed / jump to Notify)
         self._banner_lbl = tk.Label(
             hdr, text="",
             bg=C["accent_dk"], fg="white",
-            font=FONT_SMALL, padx=8, pady=0, anchor="w",
+            font=FONT_SMALL, padx=8, pady=0, anchor="w", cursor="hand2",
         )
         self._banner_lbl.pack(side="left", padx=(4, 0))
+        self._banner_lbl.bind("<Button-1>", self._banner_click)
 
         # Setup vars (must be before _tick())
         self._hud_enabled_var = tk.BooleanVar(value=self._hud_enabled)
@@ -4490,13 +4668,22 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             "write",
             lambda *_: (setattr(self, "_min_to_tray_cfg", self._min_to_tray.get()),
                         self._save_config()))
+        self._startup_summary_var = tk.BooleanVar(value=self._startup_summary_cfg)
+        self._startup_summary_var.trace_add(
+            "write",
+            lambda *_: (setattr(self, "_startup_summary_cfg",
+                                self._startup_summary_var.get()),
+                        self._save_config()))
         self._notify_display_sec = tk.IntVar(value=self._notify_display_sec_cfg)
         self._notify_display_sec.trace_add("write", lambda *_: self._save_config())
+        self._notify_sound = tk.BooleanVar(value=self._notify_sound_cfg)
+        self._notify_sound.trace_add("write", lambda *_: self._save_config())
         self.attributes("-topmost", self._topmost_cfg)
         self.attributes("-alpha", self._alpha_cfg)
         self._show_options = tk.BooleanVar(value=False)
 
         self._tick()
+        self.after(120, self._apply_win11_frame)
 
         # ⚙ Settings menu (rightmost)
         def _show_settings():
@@ -4504,6 +4691,10 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                         bg=C["card"], fg=C["text"],
                         activebackground=C["card_h"], activeforeground=C["text"],
                         relief="flat", font=FONT_SMALL)
+
+            m.add_command(label="Command palette  (Ctrl+K)",
+                          command=self._open_command_palette)
+            m.add_separator()
 
             # Theme submenu
             theme_sub = tk.Menu(m, tearoff=0,
@@ -4553,6 +4744,11 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                               variable=self._banner_enabled,
                               onvalue=True, offvalue=False)
 
+            # Notification sound toggle
+            m.add_checkbutton(label="Notification sound",
+                              variable=self._notify_sound,
+                              onvalue=True, offvalue=False)
+
             # CPU/MEM HUD toggle
             m.add_checkbutton(label="CPU/MEM monitor",
                               variable=self._hud_enabled_var,
@@ -4561,6 +4757,11 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             # Minimize-to-tray toggle (off = minimize stays in taskbar)
             m.add_checkbutton(label="Minimize to tray",
                               variable=self._min_to_tray,
+                              onvalue=True, offvalue=False)
+
+            # Startup task summary popup (due today / overdue)
+            m.add_checkbutton(label="Startup task summary",
+                              variable=self._startup_summary_var,
                               onvalue=True, offvalue=False)
 
             # Notify duration
@@ -4643,6 +4844,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             m.add_command(label=("* " if is_top else "  ") + "Pin on top",
                           command=_toggle_topmost)
 
+            # Mini mode: shrink to a floating mascot icon
+            m.add_command(label="Mini mode", command=self._enter_mini_mode)
+
             # Start with Windows (HKCU Run key)
             in_startup = self._is_startup_enabled()
             m.add_command(label=("* " if in_startup else "  ") + "Start with Windows",
@@ -4706,6 +4910,14 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                             bg=C["accent"], fixed=True)
         _cfg_btn.pack(side="right", padx=(0, 6))
 
+        # Mini mode: one-click shrink to the floating mascot
+        self._mini_btn = _PillBtn(hdr, text="Mini",
+                                  command=self._enter_mini_mode,
+                                  kind="header", font=FONT_SMALL,
+                                  padx=10, pady=4, bg=C["accent"], fixed=True)
+        self._mini_btn.pack(side="right", padx=(0, 2))
+        self._attach_tip(self._mini_btn, lambda: "Mini mode  (Ctrl+M)")
+
         # Screenshot (Record moved to the settings menu / Ctrl+K palette);
         # hidden at the xs breakpoint where it would clip mid-word
         self._shot_btn = _PillBtn(hdr, text="Screenshot",
@@ -4713,6 +4925,15 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                                   kind="header", font=FONT_SMALL,
                                   padx=12, pady=4, bg=C["accent"], fixed=True)
         self._shot_btn.pack(side="right", padx=(0, 2))
+
+        # Command palette launcher (always visible: the one-click entry point)
+        _pal_btn = _PillBtn(hdr, text="Cmd",
+                            command=self._open_command_palette,
+                            kind="header", font=FONT_SMALL,
+                            padx=10, pady=4, bg=C["accent"], fixed=True)
+        _pal_btn.pack(side="right", padx=(0, 2))
+        self._attach_tip(_pal_btn,
+                         lambda: "Command palette  (Ctrl+K / Ctrl+P / \"/\")")
 
 
         # Minimize to tray
@@ -5068,6 +5289,52 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         # separator (spacer, packed last = first to shrink)
         tk.Frame(self._tab_bar, bg=C["bg"]).pack(side="left", fill="x", expand=True)
 
+    def _visible_tab_order(self) -> list[int]:
+        """Tab indices in on-screen order: categories, then pinned system tabs."""
+        order = list(range(len(self._data)))
+        order += [idx for key, _l, idx in self._SYSTEM_TABS
+                  if key in self._pinned_tabs]
+        return order
+
+    def _cycle_tab(self, step: int):
+        """Ctrl+Tab / Ctrl+Shift+Tab: move to the neighboring tab."""
+        order = self._visible_tab_order()
+        if not order:
+            return "break"
+        try:
+            pos = order.index(self._active)
+        except ValueError:   # active tab unpinned (opened via the menu)
+            pos = -step if step > 0 else 0
+        self._switch_tab(order[(pos + step) % len(order)])
+        return "break"
+
+    def _goto_tab_n(self, n: int):
+        """Ctrl+1-9: jump straight to the nth visible tab."""
+        order = self._visible_tab_order()
+        if 0 <= n < len(order):
+            self._switch_tab(order[n])
+        return "break"
+
+    # ── Undo (last deletion) ───────────────────────────────
+
+    def _register_undo(self, restore):
+        """Remember how to restore the most recently deleted item (1 level)."""
+        self._undo_restore = restore
+
+    def _undo_last(self, _e=None):
+        """Ctrl+Z: restore the last deleted item (outside text inputs)."""
+        try:
+            f = self.focus_get()
+        except Exception:
+            f = None
+        if isinstance(f, (tk.Entry, tk.Text, tk.Spinbox, ttk.Entry)):
+            return   # let the text widget's own editing behavior win
+        restore, self._undo_restore = self._undo_restore, None
+        if restore is None:
+            return
+        restore()
+        return "break"
+
     def _switch_tab(self, idx: int):
         # Cancel search when leaving Grep tab
         if self._active == -12 and idx != -12:
@@ -5366,9 +5633,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         else:
             outer.pack(fill="x", pady=(1 if size == "compact" else PAD_ROW_Y),
                        padx=PAD_ROW_X)
-        R = {"compact": 8, "normal": 10, "large": 12}.get(size, 10)
-        plate, card, _plate_redraw = _rounded_card(outer, radius=R,
-                                                   pad_x=pad_x, pad_y=pad_y)
+        card = tk.Frame(outer, bg=C["card"], padx=pad_x, pady=pad_y,
+                        highlightthickness=1, highlightbackground=C["border"])
+        card.pack(fill="both", expand=True)
 
         _make_type_glyph(card, _item_kind(path, item_type),
                          C["card"]).pack(side="left", padx=(0, 2))
@@ -5413,11 +5680,11 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
         def _on_enter(e, f=card):
             _set_bg(f, C["card_h"])
-            _plate_redraw(fill=C["card_h"], outline=C["accent"])
+            f.configure(highlightbackground=C["accent"])
 
         def _on_leave(e, f=card):
             _set_bg(f, C["card"])
-            _plate_redraw(fill=C["card"], outline=C["border"])
+            f.configure(highlightbackground=C["border"])
 
         # Click = open, drag ≥6px = reorder. Tk's implicit grab keeps
         # sending B1-Motion to the pressed widget, so drop targets are
@@ -5468,13 +5735,12 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             for child in w.winfo_children():
                 _bind_open(child)
 
-        _bind_open(plate)   # covers card + children; corners stay clickable
-        self._card_frames.append(plate)
+        _bind_open(card)    # covers card + children
+        self._card_frames.append(card)
 
         # Show hovered path in the bottom status bar
-        for _w in (plate, card):
-            _w.bind("<Enter>", lambda e: self._pathbar_var.set(path), add="+")
-            _w.bind("<Leave>", lambda e: self._pathbar_var.set(""),   add="+")
+        card.bind("<Enter>", lambda e: self._pathbar_var.set(path), add="+")
+        card.bind("<Leave>", lambda e: self._pathbar_var.set(""),   add="+")
         for child in tuple(card.winfo_children()):
             if child not in extra_btns:
                 child.bind("<Enter>", lambda e, p=path: self._pathbar_var.set(p), add="+")
@@ -5497,9 +5763,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         if idx is None or not (0 <= idx < len(self._card_frames)):
             return
         try:
-            self._card_frames[idx]._redraw(
-                outline=C["accent"] if on else C["border"],
-                ow=2 if on else 1)
+            self._card_frames[idx].configure(
+                highlightbackground=C["accent"] if on else C["border"])
         except tk.TclError:
             pass
 
@@ -5599,9 +5864,16 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._render_list()
 
     def _remove_folder(self, idx: int):
-        name = self._current["folders"][idx]["name"]
+        cat  = self._current
+        name = cat["folders"][idx]["name"]
         if messagebox.askyesno("Remove", f"Remove \"{name}\" from the list?", parent=self):
-            self._current["folders"].pop(idx)
+            item = cat["folders"].pop(idx)
+
+            def _restore(c=cat, i=idx, it=item):
+                c["folders"].insert(min(i, len(c["folders"])), it)
+                self._save()
+                self._render_list()
+            self._register_undo(_restore)
             self._save()
             self._render_list()
 
@@ -5955,22 +6227,31 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         left = tk.Frame(card, bg=C["card"])
         left.pack(side="left", fill="both", expand=True)
 
-        proto_color = {"SSH": C["accent"], "RDP": C["accent_dk"],
-                       "SMB": C["text_sub"]}.get(conn["protocol"], C["text_sub"])
-        # group badge (hidden if not in any group)
-        grp = conn.get("group", "")
-        name_text = f"  {conn['name']}"
-        if grp:
-            name_text += f"  [{grp}]"
-        tk.Label(left, text=name_text,
+        # title row: name + protocol chip + group chip
+        title_row = tk.Frame(left, bg=C["card"])
+        title_row.pack(fill="x")
+        tk.Label(title_row, text=f"  {conn['name']}",
                  bg=C["card"], fg=C["text"],
-                 font=FONT_BOLD, anchor="w").pack(fill="x")
+                 font=FONT_BOLD, anchor="w").pack(side="left")
+        proto = conn["protocol"]
+        chip_bg, chip_fg = {
+            "SSH":    (C["accent"],    "white"),
+            "Telnet": (C["accent_dk"], "white"),
+            "RDP":    (C["accent_lt"], _ink_on(C["accent_lt"])),
+        }.get(proto, (C["border"], C["text"]))   # SMB & unknown: neutral
+        tk.Label(title_row, text=proto, bg=chip_bg, fg=chip_fg,
+                 font=FONT_SMALL_BOLD, padx=5, pady=1).pack(side="left", padx=(8, 0))
+        grp = conn.get("group", "")
+        if grp:
+            tk.Label(title_row, text=grp,
+                     bg=C["tab_inact"], fg=C["text_sub"],
+                     font=FONT_SMALL, padx=5, pady=1).pack(side="left", padx=(4, 0))
         if conn["protocol"] == "SMB":
-            sub_text = f"SMB  {conn['host']}"
+            sub_text = conn["host"]
         else:
             ncmds = len(conn.get("commands", []))
             cmd_str = f"  {ncmds} cmd{'s' if ncmds != 1 else ''}" if ncmds else ""
-            sub_text = f"{conn['protocol']}  {conn['user']}@{conn['host']}:{conn.get('port', 22)}{cmd_str}"
+            sub_text = f"{conn['user']}@{conn['host']}:{conn.get('port', 22)}{cmd_str}"
         # connection statistics
         cnt = conn.get("connect_count", 0)
         last = conn.get("last_connected")
@@ -5982,7 +6263,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         if stats_parts:
             sub_text += "  |  " + "  ".join(stats_parts)
         tk.Label(left, text=sub_text,
-                 bg=C["card"], fg=proto_color,
+                 bg=C["card"], fg=C["text_sub"],
                  font=FONT_SMALL, anchor="w").pack(fill="x")
 
         del_btn = tk.Button(card, text="x",
@@ -6011,7 +6292,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             dot_cv.create_oval(1, 1, 11, 11, fill=dot_color, outline="", tags="dot")
             self._conn_ping_dots.setdefault(host, []).append(dot_cv)
 
-        for widget in (card, left) + tuple(left.winfo_children()):
+        for widget in ((card, left) + tuple(left.winfo_children())
+                       + tuple(title_row.winfo_children())):
             widget.bind("<Button-1>", lambda e, c=conn: self._connect_server(c))
             widget.bind("<Enter>",    lambda e, f=card: _set_bg(f, C["card_h"]))
             widget.bind("<Leave>",    lambda e, f=card: _set_bg(f, C["card"]))
@@ -6063,7 +6345,13 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
     def _remove_conn(self, idx: int):
         name = self._conns[idx]["name"]
         if messagebox.askyesno("Remove", f"Remove \"{name}\"?", parent=self):
-            self._conns.pop(idx)
+            item = self._conns.pop(idx)
+
+            def _restore(i=idx, it=item):
+                self._conns.insert(min(i, len(self._conns)), it)
+                self._save_conns()
+                self._render_list()
+            self._register_undo(_restore)
             self._save_conns()
             self._render_list()
 
@@ -6581,9 +6869,16 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._render_list()
 
     def _remove_bookmark(self, item_idx: int):
-        name = self._bookmarks[self._bm_selected]["items"][item_idx]["name"]
+        items = self._bookmarks[self._bm_selected]["items"]
+        name = items[item_idx]["name"]
         if messagebox.askyesno("Remove", f'Remove "{name}"?', parent=self):
-            self._bookmarks[self._bm_selected]["items"].pop(item_idx)
+            item = items.pop(item_idx)
+
+            def _restore(lst=items, i=item_idx, it=item):
+                lst.insert(min(i, len(lst)), it)
+                self._save_config()
+                self._render_list()
+            self._register_undo(_restore)
             self._save_config()
             self._render_list()
 
@@ -7134,7 +7429,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         qa_outer = tk.Frame(self._list_frame, bg=C["bg"])
         qa_outer.pack(fill="x", padx=6, pady=(6, 4))
 
-        _qa_plate, card, _qa_redraw = _rounded_card(qa_outer, radius=12)
+        card = tk.Frame(qa_outer, bg=C["card"], relief="flat",
+                        highlightthickness=1, highlightbackground=C["border"])
+        card.pack(fill="x")
 
         existing_events = self._event_names()
         default_event = (getattr(self, "_task_quick_event", "")
@@ -7205,12 +7502,12 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         content_entry.bind("<FocusIn>", _clear_ph, add="+")
         content_entry.bind("<FocusOut>", _restore_ph, add="+")
 
-        # ── focus ring: highlight the rounded outline while editing ──
+        # ── focus ring: highlight the outline while editing ──
         def _focus_on(_e=None):
-            _qa_redraw(outline=C["accent"], ow=2)
+            card.configure(highlightbackground=C["accent"])
 
         def _focus_off(_e=None):
-            _qa_redraw(outline=C["border"], ow=1)
+            card.configure(highlightbackground=C["border"])
 
         for w in (ev_cb, content_entry):
             w.bind("<FocusIn>",  _focus_on,  add="+")
@@ -7288,9 +7585,12 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
         # work-in-progress bar
         self._work_bar_lbl = None
+        if self._work_active is not None and not any(
+                t is self._work_active["task"] for t in self._tasks):
+            self._work_active = None   # the running task was deleted
         if self._work_active is not None:
             wa   = self._work_active
-            task = self._tasks[wa["task_idx"]]
+            task = wa["task"]
             elapsed = (datetime.datetime.now() - wa["start"]).total_seconds()
             bar = tk.Frame(self._list_frame, bg=C["accent_lt"])
             bar.pack(fill="x", padx=2, pady=(2, 0))
@@ -7301,7 +7601,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             )
             self._work_bar_lbl.pack(side="left", padx=10, pady=5)
             tk.Button(bar, text="Stop Work",
-                      command=lambda: self._stop_work(wa["task_idx"]),
+                      command=self._stop_work,
                       bg=C["btn_del"], fg="white", relief="flat", bd=0,
                       font=FONT, cursor="hand2", padx=10, pady=3,
                       activebackground=C["btn_del_h"], activeforeground="white",
@@ -7405,7 +7705,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         tree.column("#0",        width=100, minwidth=70,  stretch=True)
         tree.column("process",   width=170, minwidth=70,  stretch=False)
         tree.column("content",   width=120, minwidth=60,  stretch=True)
-        tree.column("progress",  width=58,  minwidth=45,  stretch=False)
+        tree.column("progress",  width=78,  minwidth=60,  stretch=False)
         tree.column("deadline",  width=82,  minwidth=70,  stretch=False)
         tree.column("remaining", width=68,  minwidth=55,  stretch=False)
         tree.column("updated",   width=82,  minwidth=70,  stretch=False)
@@ -7422,7 +7722,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 tree["displaycolumns"] = ("process", "progress", "deadline")
                 tree.column("#0",       width=max(70, w // 3), stretch=True)
                 tree.column("process",  width=max(70, w // 2), stretch=False)
-                tree.column("progress", width=55, stretch=False)
+                tree.column("progress", width=64, stretch=False)
                 tree.column("deadline", width=76, stretch=False)
             else:
                 # md: all columns visible
@@ -7430,7 +7730,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 tree.column("#0",        width=100, minwidth=70,  stretch=True)
                 tree.column("process",   width=170, minwidth=70,  stretch=False)
                 tree.column("content",   width=120, minwidth=60,  stretch=True)
-                tree.column("progress",  width=58,  minwidth=45,  stretch=False)
+                tree.column("progress",  width=78,  minwidth=60,  stretch=False)
                 tree.column("deadline",  width=82,  minwidth=70,  stretch=False)
                 tree.column("remaining", width=68,  minwidth=55,  stretch=False)
                 tree.column("updated",   width=82,  minwidth=70,  stretch=False)
@@ -7451,23 +7751,31 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         except Exception:
             pass
 
-        # row color by progress (red=critical / yellow=caution / green=ok)
+        # status: tiny color chip at the row start + colored text for urgent
+        # rows; row backgrounds stay flat (the solid pastel bands looked
+        # dated next to the card-based tabs)
         _dark = self._theme in ("dark", "claude", "scarlet", "ocean",
                                 "cyber", "synthwave", "matrix")
-        if _dark:
-            tree.tag_configure("p_red",    background="#5C1A20", foreground="#FFB0B8")
-            tree.tag_configure("p_yellow", background="#4A3A00", foreground="#FFE680")
-            tree.tag_configure("p_green",  background="#1A3C24", foreground="#80DDA0")
-            tree.tag_configure("done",     background="#163020", foreground="#60CC80")
-            tree.tag_configure("dl_over",  background="#701418", foreground="#FFC8CC")
-            tree.tag_configure("dl_today", background="#5C3A0E", foreground="#FFD9A0")
-        else:
-            tree.tag_configure("p_red",    background="#FFCCCC", foreground="#7A1A1A")
-            tree.tag_configure("p_yellow", background="#FFF3BC", foreground="#6B4E00")
-            tree.tag_configure("p_green",  background="#C8EDD4", foreground="#1A5C2E")
-            tree.tag_configure("done",     background="#A8DDB8", foreground="#0F4020")
-            tree.tag_configure("dl_over",  background="#FFAFAF", foreground="#750A0A")
-            tree.tag_configure("dl_today", background="#FFDFB0", foreground="#7A4600")
+        _status_clr = {
+            "p_red":    "#E06868" if _dark else "#D9534F",
+            "p_yellow": "#E0B040" if _dark else "#E8A33D",
+            "p_green":  "#5BBB85" if _dark else "#3E9E6B",
+            "done":     "#4E9E70" if _dark else "#8CCDA6",
+            "dl_over":  "#FF7A85" if _dark else "#C62828",
+            "dl_today": "#FFC96B" if _dark else "#B26A00",
+        }
+        self._task_row_chips = {}
+        for _tag, _col in _status_clr.items():
+            _img = tk.PhotoImage(width=4, height=16)
+            _img.put(_col, to=(0, 0, 4, 16))
+            self._task_row_chips[_tag] = _img
+        tree.tag_configure("dl_over",  foreground=_status_clr["dl_over"])
+        tree.tag_configure("dl_today", foreground=_status_clr["dl_today"])
+        self._task_done_font = tkfont.Font(family=FONT[0], size=FONT[1],
+                                           overstrike=1)
+        tree.tag_configure("done", foreground=C["text_sub"],
+                           font=self._task_done_font)
+        tree.tag_configure("evt", foreground=C["accent_dk"], font=FONT_BOLD)
 
         def _progress_tag(pct: int) -> str:
             if pct == 100: return "done"
@@ -7494,6 +7802,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
         for event_name, task_list in groups.items():
             parent = tree.insert("", "end", text=event_name, open=True,
+                                 tags=("evt",),
                                  values=("", "", "", "", "", ""))
             for i, task in task_list:
                 pct      = task.get("progress", 0)
@@ -7510,9 +7819,11 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                     process_disp = f"{_recur_badge} {process_disp}"
                 _subtasks = task.get("subtasks", [])
                 task_iid = str(i)
+                _tag = _row_tag(pct, deadline)
                 tree.insert(parent, "end", iid=task_iid,
                             text="", open=bool(_subtasks),
-                            tags=(_row_tag(pct, deadline),),
+                            image=self._task_row_chips[_tag],
+                            tags=(_tag,),
                             values=(process_disp, content,
                                     f"{pct}%", deadline, remaining, updated))
                 # insert subtasks as child rows
@@ -7520,11 +7831,13 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                     sub_pct = 100 if sub.get("done") else sub.get("progress", 0)
                     sub_dl  = sub.get("deadline", "")
                     sub_rem = _days_left_str(sub_dl)
+                    _stag = _row_tag(sub_pct, sub_dl)
                     # title goes in the process column (under the parent's
                     # name), not in #0 which sits left of the parent
                     tree.insert(task_iid, "end", iid=f"{i}.{si}",
                                 text="",
-                                tags=(_row_tag(sub_pct, sub_dl),),
+                                image=self._task_row_chips[_stag],
+                                tags=(_stag,),
                                 values=(f"└ {sub.get('title', '')}", "",
                                         f"{sub_pct}%", sub_dl, sub_rem, ""))
 
@@ -7646,7 +7959,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             )
             is_running = (
                 self._work_active is not None and
-                self._work_active["task_idx"] == idx
+                self._work_active["task"] is task
             )
             if is_running:
                 elapsed = (datetime.datetime.now() -
@@ -7656,7 +7969,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                          bg=C["card"], fg=C["accent"], font=FONT_SMALL,
                          anchor="w").pack(side="left")
                 tk.Button(work_row, text="Stop Work",
-                          command=lambda i=idx: self._stop_work(i),
+                          command=self._stop_work,
                           bg=C["btn_del"], fg="white", relief="flat", bd=0,
                           font=FONT, cursor="hand2", padx=10, pady=4,
                           activebackground=C["btn_del_h"], activeforeground="white",
@@ -7849,6 +8162,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             return
 
         # delete subtasks first (descending per task, original indices still valid)
+        removed_subs: list[tuple[int, int, dict]] = []   # (task_idx, sub_idx, sub)
         by_task: dict[int, list[int]] = {}
         for ti, si in sub_pairs:
             by_task.setdefault(ti, []).append(si)
@@ -7856,11 +8170,26 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             subs = self._tasks[ti].get("subtasks", [])
             for si in sorted(sis, reverse=True):
                 if 0 <= si < len(subs):
-                    subs.pop(si)
+                    removed_subs.append((ti, si, subs.pop(si)))
+            self._sync_parent_progress(ti)   # roll up like single delete does
         # then delete whole tasks (descending index so earlier indices stay valid)
+        removed_tasks: list[tuple[int, dict]] = []
         for ti in sorted(task_idxs, reverse=True):
             if 0 <= ti < len(self._tasks):
-                self._tasks.pop(ti)
+                removed_tasks.append((ti, self._tasks.pop(ti)))
+        removed_tasks.reverse()   # ascending for re-insertion
+
+        def _restore(rt=removed_tasks, rs=removed_subs):
+            for i, t in rt:
+                self._tasks.insert(min(i, len(self._tasks)), t)
+            for ti2, si2, sub in sorted(rs, key=lambda x: (x[0], x[1])):
+                if 0 <= ti2 < len(self._tasks):
+                    subs2 = self._tasks[ti2].setdefault("subtasks", [])
+                    subs2.insert(min(si2, len(subs2)), sub)
+                    self._sync_parent_progress(ti2)
+            self._save_tasks()
+            self._render_list()
+        self._register_undo(_restore)
 
         self._save_tasks()
         self._render_list()
@@ -7905,10 +8234,10 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 idx = int(row)
                 # task row
                 is_running = (self._work_active is not None and
-                              self._work_active["task_idx"] == idx)
+                              self._work_active["task"] is self._tasks[idx])
                 if is_running:
                     menu.add_command(label="Stop Work",
-                                     command=lambda: self._stop_work(idx))
+                                     command=self._stop_work)
                 else:
                     menu.add_command(label="Start Work",
                                      command=lambda: self._start_work(idx))
@@ -8054,8 +8383,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
     def _toggle_subtask_done(self, task_idx: int, sub_idx: int):
         sub = self._tasks[task_idx]["subtasks"][sub_idx]
+        # keep sub["progress"] untouched: readers treat done as 100%, and
+        # overwriting would lose the value needed when the check is removed
         sub["done"] = not sub.get("done", False)
-        sub["progress"] = 100 if sub["done"] else sub.get("progress", 0)
         self._sync_parent_progress(task_idx)
         self._save_tasks()
         self._render_list()
@@ -8148,7 +8478,10 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
     def _check_recurring_tasks(self):
         """Fill in any ungenerated recurring task occurrences at startup."""
         today = datetime.date.today()
-        to_add = []
+        # completed instances accumulate, so pick one source per
+        # event+process+recur (the latest deadline) or every completed
+        # occurrence would spawn its own duplicate
+        to_add: dict[tuple, dict] = {}
         for task in self._tasks:
             recur = task.get("recur", "none")
             if (recur == "none" or task.get("progress", 0) < 100
@@ -8170,9 +8503,13 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 and t.get("progress", 0) < 100
                 for t in self._tasks
             )
-            if not exists:
-                to_add.append(task)
-        for t in to_add:
+            if exists:
+                continue
+            key = (task["event"], task.get("process"), recur)
+            cur = to_add.get(key)
+            if cur is None or dl > cur.get("deadline", ""):
+                to_add[key] = task
+        for t in to_add.values():
             self._spawn_recurring(t)
         if to_add:
             self._save_tasks()
@@ -8180,7 +8517,13 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
     def _remove_task(self, idx: int):
         name = self._tasks[idx]["event"]
         if messagebox.askyesno("Remove", f"Remove \"{name}\"?", parent=self):
-            self._tasks.pop(idx)
+            item = self._tasks.pop(idx)
+
+            def _restore(i=idx, it=item):
+                self._tasks.insert(min(i, len(self._tasks)), it)
+                self._save_tasks()
+                self._render_list()
+            self._register_undo(_restore)
             self._save_tasks()
             self._render_list()
 
@@ -8267,7 +8610,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self._work_anim_dots = (self._work_anim_dots + 1) % 4
         dots = ("." * self._work_anim_dots).ljust(3)
         wa   = self._work_active
-        task = self._tasks[wa["task_idx"]]
+        task = wa["task"]
         elapsed = (datetime.datetime.now() - wa["start"]).total_seconds()
         lbl.configure(
             text=f"{task.get('process', '')}  Working{dots}  {_fmt_duration(elapsed)}"
@@ -8278,7 +8621,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         """Return the active work info as a dict for config persistence."""
         if self._work_active is None:
             return None
-        task = self._tasks[self._work_active["task_idx"]]
+        task = self._work_active["task"]
         return {
             "event":   task.get("event", ""),
             "process": task.get("process", ""),
@@ -8294,23 +8637,23 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 parent=self,
             ):
                 return
-            self._stop_work(self._work_active["task_idx"])
+            self._stop_work()
         self._work_active = {
-            "task_idx": task_idx,
+            "task": self._tasks[task_idx],
             "start": datetime.datetime.now(),
         }
         self._save_config()
         self._render_list()
         self._update_tray_badge()
 
-    def _stop_work(self, task_idx: int):
-        """Stop work: record to log and save."""
+    def _stop_work(self):
+        """Stop work: record to log on the active task and save."""
         if self._work_active is None:
             return
         start_dt = self._work_active["start"]
         end_dt   = datetime.datetime.now()
+        task = self._work_active["task"]
         self._work_active = None
-        task = self._tasks[task_idx]
         task.setdefault("work_logs", []).append({
             "start": start_dt.isoformat(timespec="seconds"),
             "end":   end_dt.isoformat(timespec="seconds"),
@@ -8323,6 +8666,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
     def _on_unmap(self, event):
         if event.widget is self and self.state() == "iconic":
+            if self._mini_win is not None:
+                return   # mini mode iconifies on purpose: keep the taskbar button
             if getattr(self, "_min_to_tray_cfg", True):
                 self._minimize_to_tray()
             # else: stay iconified in the taskbar
@@ -8423,6 +8768,12 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             "after", self.after(400, _show)), add="+")
         widget.bind("<Leave>", _hide, add="+")
         widget.bind("<ButtonPress>", _hide, add="+")
+        # a more specific binding (e.g. <ButtonPress-1> on the mini mascot)
+        # suppresses the generic <ButtonPress> above, so bind button 1 too
+        widget.bind("<ButtonPress-1>", _hide, add="+")
+        # the tip is a Toplevel of the app, not of the widget: without this it
+        # outlives a destroyed widget as an orphan topmost window
+        widget.bind("<Destroy>", _hide, add="+")
 
     def _weather_tip_text(self) -> str:
         """Hover text for the header weather readout (diagnostics)."""
@@ -8637,6 +8988,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
     def _show_startup_summary(self):
         """Show a startup popup summarising tasks due today and overdue."""
+        if not getattr(self, "_startup_summary_cfg", False):
+            return
         today = datetime.date.today().isoformat()
 
         due_today = [t for t in self._tasks
@@ -8732,9 +9085,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
 
     def _update_tray_badge(self):
         """Refresh the tray icon image to reflect the current status badge."""
-        if self._tray_icon is None:
-            return
-        self._tray_icon.icon = self._build_tray_image()
+        if self._tray_icon is not None:
+            self._tray_icon.icon = self._build_tray_image()
+        self._mini_draw()   # the mini mascot mirrors the same badge
 
     def _minimize_to_tray(self):
         self.withdraw()
@@ -8753,6 +9106,9 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         self.after(0, self._do_restore)
 
     def _do_restore(self):
+        if self._mini_win is not None:
+            self._exit_mini_mode()
+            return
         self._tray_notify_pending = False
         if self._tray_icon is not None:
             self._tray_icon.stop()
@@ -8784,23 +9140,286 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             except Exception:
                 pass
 
+    # ── Mini mode: shrink to a small floating mascot icon ─
+
+    def _enter_mini_mode(self):
+        """Collapse the app into a tiny draggable mascot (the app icon).
+        Click restores the full window; drag moves it; right-click menus.
+        The main window is iconified (not withdrawn) so the taskbar button
+        stays; clicking it exits mini mode via the <Map> binding below."""
+        if self._mini_win is not None:
+            return
+        if not getattr(self, "_mini_map_bound", False):
+            self._mini_map_bound = True
+            self.bind("<Map>", self._on_mini_map, add="+")
+        self.iconify()
+        win = tk.Toplevel(self)
+        self._mini_win = win
+        win.overrideredirect(True)
+        win.attributes("-topmost", True)
+        # everything painted in the magic color becomes a see-through hole,
+        # so only the mascot silhouette floats on the desktop
+        win.attributes("-transparentcolor", "#010203")
+        win.configure(bg="#010203")
+
+        px = getattr(self, "_mini_icon_px", 48)
+        self._mini_img = self._mini_icon_image(px)
+        S = px + 12                # canvas square: icon + room for the lift
+        cv = tk.Canvas(win, width=S, height=S, bg="#010203",
+                       highlightthickness=0, bd=0, cursor="hand2")
+        cv.pack()
+        self._mini_cv = cv
+        self._mini_size = S
+        self._mini_hover = False
+        self._mini_draw()
+
+        pos = getattr(self, "_mini_pos", "")
+        if not re.match(r"^\+-?\d+\+-?\d+$", pos):
+            pos = f"+{self.winfo_rootx() + 40}+{self.winfo_rooty() + 8}"
+        win.geometry(pos)
+
+        st = {"x": 0, "y": 0, "wx": 0, "wy": 0, "drag": False}
+
+        def _press(e):
+            st.update(x=e.x_root, y=e.y_root,
+                      wx=win.winfo_x(), wy=win.winfo_y(), drag=False)
+
+        SNAP = 24   # px: magnet distance to the monitor work-area edges
+
+        def _motion(e):
+            if (not st["drag"] and abs(e.x_root - st["x"]) < 5
+                    and abs(e.y_root - st["y"]) < 5):
+                return
+            st["drag"] = True
+            nx = st["wx"] + e.x_root - st["x"]
+            ny = st["wy"] + e.y_root - st["y"]
+            try:
+                wl, wt, wr, wb = _get_monitor_work_area(win)
+                sz = self._mini_size
+                if abs(nx - wl) < SNAP:
+                    nx = wl
+                elif abs(nx + sz - wr) < SNAP:
+                    nx = wr - sz
+                if abs(ny - wt) < SNAP:
+                    ny = wt
+                elif abs(ny + sz - wb) < SNAP:
+                    ny = wb - sz
+            except Exception:
+                pass
+            win.geometry(f"+{nx}+{ny}")
+
+        def _release(_e):
+            if st["drag"]:
+                self._mini_pos = f"+{win.winfo_x()}+{win.winfo_y()}"
+                self._save_config()
+                return
+            if self._mini_win is None:
+                return
+            # single click = quick screenshot, but delayed just long enough
+            # that a double-click (restore) can cancel it
+            self._mini_click_cancel()
+            self._mini_click_after = self.after(300, self._mini_click_fire)
+
+        def _double(_e):
+            self._mini_click_cancel()
+            self._exit_mini_mode()
+
+        def _set_hover(on):
+            if on != self._mini_hover:
+                self._mini_hover = on
+                self._mini_draw()
+
+        cv.bind("<ButtonPress-1>",   _press)
+        cv.bind("<B1-Motion>",       _motion)
+        cv.bind("<ButtonRelease-1>", _release)
+        cv.bind("<Double-Button-1>", _double)
+        cv.bind("<Enter>", lambda e: _set_hover(True))
+        cv.bind("<Leave>", lambda e: _set_hover(False))
+        cv.bind("<Button-3>", self._mini_context_menu)
+        self._attach_tip(cv, self._mini_tip_text)
+
+        # Explorer drag&drop lands on the mascot too (same handler family
+        # as the main window; needs the optional tkinterdnd2 package)
+        if DND_FILES is not None:
+            try:
+                cv.drop_target_register(DND_FILES)
+                cv.dnd_bind("<<Drop>>", self._on_mini_drop)
+            except Exception:
+                pass
+
+    def _mini_draw(self):
+        cv = getattr(self, "_mini_cv", None)
+        if self._mini_win is None or cv is None:
+            return
+        S = self._mini_size
+        c = S // 2
+        cv.delete("all")
+        # hover affordance: just a small lift (a ring looked tacky)
+        cv.create_image(c, c - (2 if self._mini_hover else 0),
+                        image=self._mini_img)
+        # status badge, same semantics as the tray icon: green = work timer
+        # running, red = notification fired while collapsed
+        badge = ("#4caf50" if self._work_active is not None
+                 else C["btn_del"] if self._tray_notify_pending else None)
+        if badge:
+            r = max(4, S // 11)
+            x2, y1 = S - 2, 2
+            cv.create_oval(x2 - 2 * r - 2, y1, x2 + 2, y1 + 2 * r + 4,
+                           fill="#1a1a2e", outline="")   # contrast halo
+            cv.create_oval(x2 - 2 * r, y1 + 2, x2, y1 + 2 * r + 2,
+                           fill=badge, outline="")
+
+    def _on_mini_map(self, e):
+        """Taskbar-button click while in mini mode: back to the full window."""
+        if e.widget is self and self._mini_win is not None:
+            self._exit_mini_mode()
+
+    def _on_mini_drop(self, event):
+        """Files dropped on the mascot: register them without leaving mini
+        mode. Falls back to the first folder tab when a system tab is active."""
+        try:
+            paths = list(self.tk.splitlist(event.data))
+        except Exception:
+            paths = [event.data]
+        idx = self._active if self._active >= 0 else 0
+        self._handle_dropped_paths(paths, cat_index=idx)
+        # little hop as the "got it" feedback
+        self._mini_hover = True
+        self._mini_draw()
+        self.after(160, lambda: (setattr(self, "_mini_hover", False),
+                                 self._mini_draw()))
+
+    def _mini_click_cancel(self):
+        """Cancel a pending single-click capture (double-click won)."""
+        if getattr(self, "_mini_click_after", None) is not None:
+            try:
+                self.after_cancel(self._mini_click_after)
+            except Exception:
+                pass
+            self._mini_click_after = None
+
+    def _mini_click_fire(self):
+        self._mini_click_after = None
+        self._mini_capture()
+
+    def _mini_capture(self):
+        """Quick screenshot from mini mode: hide the mascot for the shot,
+        save with the quick-capture defaults, and stay in mini mode."""
+        win = self._mini_win
+        if win is None:
+            return
+        win.withdraw()
+
+        def _snap():
+            try:
+                save_dir = Path.home() / "Pictures"
+                img = ImageGrab.grab(all_screens=True)
+                ts = datetime.datetime.now().strftime("%Y%m%d_%H%M%S")
+                img.save(save_dir / f"screenshot_all_{ts}.png")
+                # no Explorer popup here: mini-mode capture stays silent so
+                # repeated shots don't bury the screen in folder windows
+            finally:
+                if self._mini_win is win:
+                    win.deiconify()
+
+        self.after(250, _snap)   # let the mascot actually leave the screen
+
+    def _mini_icon_image(self, px: int) -> tk.PhotoImage:
+        """Mascot image scaled to px, rendered from the 256px master."""
+        try:
+            master = _make_icon_master(ICON_PALETTES.get(self._theme),
+                                       getattr(self, "_icon_shape", "jelly"))
+            im = master.resize((px, px), Image.LANCZOS)
+            buf = io.BytesIO()
+            im.save(buf, format="PNG")
+            return tk.PhotoImage(
+                data=base64.b64encode(buf.getvalue()).decode())
+        except Exception:
+            return self._icon   # fallback: the stock 64px icon
+
+    def _set_mini_size(self, px: int):
+        """Change the mascot size; applies live if mini mode is showing."""
+        self._mini_icon_px = px
+        self._save_config()
+        if self._mini_win is None or self._mini_cv is None:
+            return
+        self._mini_img = self._mini_icon_image(px)
+        S = px + 12
+        self._mini_size = S
+        self._mini_cv.configure(width=S, height=S)
+        self._mini_draw()
+
+    def _mini_tip_text(self) -> str:
+        now = datetime.datetime.now()
+        wst = getattr(self, "_weather_state", None)
+        parts = [now.strftime("%H:%M"), now.strftime("%m/%d %a").upper()]
+        if wst:
+            parts.append(wst[1])
+        return ("  ".join(parts)
+                + "\nClick: screenshot    Double-click: full view")
+
+    def _mini_context_menu(self, e):
+        m = tk.Menu(self, tearoff=0, bg=C["card"], fg=C["text"],
+                    activebackground=C["card_h"], activeforeground=C["text"],
+                    relief="flat", font=FONT_SMALL)
+        m.add_command(label="Back to full view", command=self._exit_mini_mode)
+        m.add_command(label="Take screenshot",   command=self._mini_capture)
+        size_sub = tk.Menu(m, tearoff=0, bg=C["card"], fg=C["text"],
+                           activebackground=C["card_h"],
+                           activeforeground=C["text"],
+                           relief="flat", font=FONT_SMALL)
+        cur = getattr(self, "_mini_icon_px", 48)
+        for label, px in (("Small", 32), ("Medium", 48),
+                          ("Large", 64), ("XL", 80)):
+            prefix = "* " if cur == px else "  "
+            size_sub.add_command(label=f"{prefix}{label}  ({px}px)",
+                                 command=lambda p=px: self._set_mini_size(p))
+        m.add_cascade(label="Size", menu=size_sub)
+        m.add_separator()
+        m.add_command(label="Quit Gem", command=self._do_quit)
+        self._popup_menu(m, e.x_root, e.y_root)
+
+    def _exit_mini_mode(self):
+        if self._mini_win is None:
+            return
+        self._mini_click_cancel()
+        self._tray_notify_pending = False   # badge is "seen" once restored
+        try:
+            self._mini_pos = (f"+{self._mini_win.winfo_x()}"
+                              f"+{self._mini_win.winfo_y()}")
+            self._mini_win.destroy()
+        except Exception:
+            pass
+        self._mini_win = None
+        self._mini_cv = None
+        self._save_config()
+        self.deiconify()
+        self.lift()
+        self.focus_force()
+
     # ── Command palette (Ctrl+K) ──────────────────────────
 
-    def _palette_items(self) -> list[tuple[str, str, str, object]]:
-        """Collect all launchable items as (kind, label, search_text, action)."""
-        items: list[tuple[str, str, str, object]] = []
+    def _palette_items(self) -> list[tuple]:
+        """Collect all launchable items as (kind, label, search_text, action, alt).
+
+        alt is None or {"ctrl": fn, "shift": fn, "hint": str}: modifier
+        actions run on Ctrl+Enter / Shift+Enter, hint shows in the footer.
+        """
+        items: list[tuple] = []
         for cat in self._data:
             for entry in cat.get("folders", []):
                 kind = "File" if entry.get("type") == "file" else "Folder"
                 name, path = entry.get("name", ""), entry.get("path", "")
                 items.append((kind, name, f"{name} {path}",
                               lambda p=path, t=entry.get("type", "folder"):
-                                  self._open_item(p, t)))
-        for conn in self._conns:
+                                  self._open_item(p, t), None))
+        for i, conn in enumerate(self._conns):
             name = conn.get("name") or conn.get("host", "")
             items.append(("Conn", f"{name}  ({conn.get('protocol', '')})",
                           f"{name} {conn.get('host', '')} {conn.get('protocol', '')}",
-                          lambda c=conn: self._connect_server(c)))
+                          lambda c=conn: self._connect_server(c),
+                          {"shift": lambda i2=i: self._edit_conn(i2),
+                           "hint": "Enter: Connect    Shift+Enter: Edit"}))
         for i, task in enumerate(self._tasks):
             if task.get("archived"):
                 continue
@@ -8808,23 +9427,28 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             items.append(("Task", label,
                           f"{task.get('event', '')} {task.get('process', '')} "
                           f"{task.get('content', '')}",
-                          lambda idx=i: self._palette_goto_task(idx)))
+                          lambda idx=i: self._palette_goto_task(idx),
+                          {"ctrl": lambda idx=i: self._start_work(idx),
+                           "shift": lambda idx=i: self._quick_set_progress(
+                               idx, min(100, self._tasks[idx].get("progress", 0) + 10)),
+                           "hint": ("Enter: Jump    Ctrl+Enter: Start Work"
+                                    "    Shift+Enter: +10%")}))
         for cat in self._bookmarks:
             for bm in cat.get("items", []):
                 items.append(("Web", bm.get("name", ""),
                               f"{bm.get('name', '')} {bm.get('url', '')}",
-                              lambda u=bm.get("url", ""): webbrowser.open(u)))
+                              lambda u=bm.get("url", ""): webbrowser.open(u), None))
         for i, item in enumerate(self._notify_items):
             title = item.get("title", "")
             items.append(("Notify", title,
                           f"notify {title} {item.get('notes', '')}",
-                          lambda: self._switch_tab(-3)))
+                          lambda: self._switch_tab(-3), None))
         for key, label, idx in self._SYSTEM_TABS:
             items.append(("Tab", label, f"tab {label} {key}",
-                          lambda i2=idx: self._switch_tab(i2)))
+                          lambda i2=idx: self._switch_tab(i2), None))
         for ci, cat in enumerate(self._data):
             items.append(("Tab", cat["category"], f"tab {cat['category']}",
-                          lambda i2=ci: self._switch_tab(i2)))
+                          lambda i2=ci: self._switch_tab(i2), None))
         # app actions: everything reachable from the header / settings menu
         actions: list[tuple[str, str, object]] = [
             ("Take screenshot", "screenshot capture", self._open_screenshot),
@@ -8841,19 +9465,76 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
              lambda: self._min_to_tray.set(not self._min_to_tray.get())),
             ("Minimize to tray now", "hide tray minimize",
              self._minimize_to_tray),
+            ("Mini mode", "mini mode compact small mascot widget",
+             self._enter_mini_mode),
+            ("Export tasks", "export tasks report write",
+             self._export_tasks),
+            ("Task history", "task history progress digest log",
+             self._open_task_history),
+            ("Toggle hide done tasks", "hide done tasks toggle filter",
+             lambda: (setattr(self, "_task_hide_done",
+                              not getattr(self, "_task_hide_done", False)),
+                      self._save_config(),
+                      self._render_list() if self._active == -2 else None)),
+            ("Open logs folder", "logs folder open teraterm session",
+             self._open_logs_folder),
+            ("Refresh weather", "weather refresh update",
+             lambda: self._weather_start(force=True)),
+            ("Transparency...", "transparency alpha opacity window",
+             self._open_transparency_dialog),
+            ("Toggle start with Windows", "startup windows boot autostart",
+             self._toggle_startup),
         ]
+        for size in ("compact", "normal", "large"):
+            actions.append((f"Card size: {size.capitalize()}",
+                            f"card size view {size}",
+                            lambda s=size: self._set_card_size(s)))
         for label, keys, fn in actions:
-            items.append(("Action", label, f"action {label} {keys}", fn))
+            items.append(("Action", label, f"action {label} {keys}", fn, None))
         for key in THEMES:
             items.append(("Theme", f"Theme: {key.capitalize()}",
                           f"theme color {key}",
-                          lambda k=key: self._apply_theme(k)))
+                          lambda k=key: self._apply_theme(k), None))
         return items
+
+    def _palette_quick_add_task(self, text: str):
+        """Create a task from palette input (same shape as the quick-add row)."""
+        ev = (getattr(self, "_task_quick_event", "")
+              or (self._tasks[-1]["event"] if self._tasks else "General"))
+        today = datetime.date.today().isoformat()
+        new_task = {"event": ev, "process": text, "content": "",
+                    "progress": 0, "deadline": "", "work_folders": [],
+                    "recur": "none", "created_at": today, "updated": today}
+        _log_task_progress(new_task, 0, created=True)
+        self._tasks.append(new_task)
+        self._save_tasks()
+        self._palette_goto_task(len(self._tasks) - 1)
+
+    def _palette_add_folder(self, path: str):
+        """Register a typed path into the active (or first) folder tab."""
+        path = os.path.normpath(path)
+        cat = self._current if self._active >= 0 else self._data[0]
+        if any(e.get("path") == path for e in cat["folders"]):
+            return
+        entry = {"name": os.path.basename(path) or path, "path": path}
+        if os.path.isfile(path):
+            entry["type"] = "file"
+        cat["folders"].append(entry)
+        self._save()
+        if self._active >= 0:
+            self._render_list()
 
     def _palette_goto_task(self, idx: int):
         """Jump to the Tasks tab and select the given task."""
         self._task_select_pending = idx
         self._switch_tab(-2)
+
+    def _palette_key_open(self, _e=None):
+        """Open the palette from a bare "/" press; unlike Ctrl+K it never
+        toggles an open palette shut (so "/" can be typed in queries)."""
+        if self._palette_win is not None:
+            return
+        return self._open_command_palette()
 
     def _open_command_palette(self, _e=None):
         # toggle: a second Ctrl+K closes the palette
@@ -8864,12 +9545,13 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                 pass
             self._palette_win = None
             return "break"
-        # don't fire while typing in an input (Entry/Text bind Ctrl+K natively)
+        # don't fire while typing in an input (Entry/Text bind Ctrl+K natively;
+        # ttk.Entry also covers Combobox)
         try:
             f = self.focus_get()
         except Exception:
             f = None
-        if isinstance(f, (tk.Entry, tk.Text, tk.Spinbox)):
+        if isinstance(f, (tk.Entry, tk.Text, tk.Spinbox, ttk.Entry)):
             return
 
         win = tk.Toplevel(self)
@@ -8886,6 +9568,11 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                          insertbackground=C["accent"])
         entry.pack(fill="x", padx=10, pady=(10, 6), ipady=3)
         tk.Frame(inner, bg=C["border"], height=1).pack(fill="x")
+        # footer hint bar (packed bottom-first so the list never clips it)
+        hint_var = tk.StringVar()
+        tk.Label(inner, textvariable=hint_var, bg=C["card"], fg=C["text_sub"],
+                 font=FONT_TINY, anchor="w", padx=10).pack(
+                     side="bottom", fill="x", pady=(0, 6))
         lst = tk.Text(inner, height=12, font=FONT,
                       bg=C["card"], fg=C["text"],
                       relief="flat", bd=0, wrap="none", cursor="arrow",
@@ -8894,11 +9581,13 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         lst.pack(fill="both", expand=True, padx=6, pady=6)
         lst.tag_configure("selline", background=C["accent_lt"])
         lst.tag_configure("hit", foreground=C["accent_dk"], underline=True)
+        lst.tag_configure("num", foreground=C["text_sub"])
         for k, col in (("Folder", C["accent"]), ("Web", C["accent"]),
                        ("Notify", C["accent"]), ("Conn", C["accent_dk"]),
                        ("Task", C["accent_dk"]), ("Action", C["accent_dk"]),
                        ("File", C["text_sub"]), ("Tab", C["text_sub"]),
-                       ("Theme", C["text_sub"])):
+                       ("Theme", C["text_sub"]), ("Open", C["accent"]),
+                       ("New", C["accent"])):
             lst.tag_configure(f"k_{k}", foreground=col)
 
         items = self._palette_items()
@@ -8906,28 +9595,73 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         sel = [0]
         freq: dict = getattr(self, "_palette_freq", {})
 
+        _PREFIX = {">": {"Action", "Theme"}, "#": {"Task"},
+                   "@": {"Conn"}, "?": {"Web"}}
+        DEFAULT_HINT = ("Enter: Run    Alt+1-9: Run item    "
+                        "Prefix  >Action  #Task  @Conn  ?Web")
+
         def _mark_sel():
             lst.tag_remove("selline", "1.0", "end")
             if matches:
                 i = sel[0]
                 lst.tag_add("selline", f"{i + 1}.0", f"{i + 2}.0")
                 lst.see(f"{i + 1}.0")
+                alt = matches[i][4]
+                hint_var.set(alt["hint"] if alt and alt.get("hint")
+                             else DEFAULT_HINT)
+            else:
+                hint_var.set(DEFAULT_HINT)
 
         def _refresh(*_):
-            q = var.get()
+            q_full = var.get()
+            kinds = _PREFIX.get(q_full[:1])   # 1st char filters by kind
+            q = (q_full[1:] if kinds else q_full).strip()
             scored = []
             for it in items:
+                if kinds is not None and it[0] not in kinds:
+                    continue
                 s = _fuzzy_score(q, it[2])
                 if s is not None:
                     scored.append((s, it))
-            # ties (incl. empty query) fall back to most-used first
-            scored.sort(key=lambda x: (x[0], -freq.get(f"{x[1][0]}:{x[1][1]}", 0)))
-            matches[:] = [it for _, it in scored[:12]]
+
+            # ties (incl. empty query): most-used first, with a recency boost
+            now = time.time()
+
+            def _rank(it):
+                cnt, last = freq.get(f"{it[0]}:{it[1]}") or (0, 0.0)
+                if last:
+                    days = (now - last) / 86400
+                    cnt += 5 if days < 1 else 3 if days < 3 else 1 if days < 7 else 0
+                return cnt
+
+            scored.sort(key=lambda x: (x[0], -_rank(x[1])))
+
+            # synthesized candidates: open a typed path/URL directly
+            synth: list = []
+            if kinds is None and q:
+                low = q.lower()
+                if re.match(r"[a-zA-Z]:[\\/]|\\\\", q) and os.path.exists(q):
+                    t = "file" if os.path.isfile(q) else "folder"
+                    synth.append(("Open", f"Open: {q}", "",
+                                  lambda p=q, t2=t: self._open_item(p, t2), None))
+                    synth.append(("New", f"Add to folder tab: {q}", "",
+                                  lambda p=q: self._palette_add_folder(p), None))
+                elif low.startswith(("http://", "https://", "www.")):
+                    url = q if low.startswith("http") else f"https://{q}"
+                    synth.append(("Open", f"Open in browser: {q}", "",
+                                  lambda u=url: webbrowser.open(u), None))
+            matches[:] = (synth + [it for _, it in scored])[:12]
+            # nothing matched: offer to create a task from the query
+            if not matches and q and kinds is None:
+                matches[:] = [("New", f'Add task: "{q}"', "",
+                               lambda s2=q: self._palette_quick_add_task(s2),
+                               None)]
             sel[0] = 0
             lst.configure(state="normal")
             lst.delete("1.0", "end")
-            for kind, label, _t, _a in matches:
-                lst.insert("end", f" {kind:<7}", (f"k_{kind}",))
+            for i3, (kind, label, _t, _a, _alt) in enumerate(matches):
+                lst.insert("end", f" {i3 + 1 if i3 < 9 else ' '} ", ("num",))
+                lst.insert("end", f"{kind:<7}", (f"k_{kind}",))
                 hits = _match_positions(label, q)
                 run, run_hit = "", False
                 for i2, ch in enumerate(label):   # insert in runs, not per char
@@ -8953,22 +9687,33 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             except Exception:
                 pass
 
-        def _run(_e=None):
+        def _run(_e=None, key=None):
             if not matches:
                 _close()
-                return
-            kind, label, _t, action = matches[min(sel[0], len(matches) - 1)]
-            key = f"{kind}:{label}"
-            freq[key] = freq.get(key, 0) + 1
-            self._palette_freq = freq
-            self._save_config()
+                return "break"
+            kind, label, _t, action, alt = matches[min(sel[0], len(matches) - 1)]
+            if key is not None and alt and alt.get(key):
+                action = alt[key]
+            if kind not in ("Open", "New"):   # don't rank one-off synthetics
+                fkey = f"{kind}:{label}"
+                cnt = (freq.get(fkey) or (0, 0.0))[0]
+                freq[fkey] = [cnt + 1, time.time()]
+                self._palette_freq = freq
+                self._save_config()
             _close()
             self.after(10, action)   # run after the palette is gone
+            return "break"
 
         def _move(d):
             if matches:
                 sel[0] = max(0, min(len(matches) - 1, sel[0] + d))
                 _mark_sel()
+            return "break"
+
+        def _run_nth(i):
+            if 0 <= i < len(matches):
+                sel[0] = i
+                _run()
             return "break"
 
         def _click(e):
@@ -8979,9 +9724,25 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             return "break"
 
         entry.bind("<Return>",  _run)
+        entry.bind("<Control-Return>", lambda e: _run(key="ctrl"))
+        entry.bind("<Shift-Return>",   lambda e: _run(key="shift"))
         entry.bind("<Escape>",  _close)
         entry.bind("<Down>",    lambda e: _move(1))
         entry.bind("<Up>",      lambda e: _move(-1))
+        entry.bind("<Prior>",   lambda e: _move(-5))   # PageUp
+        entry.bind("<Next>",    lambda e: _move(5))    # PageDown
+
+        def _complete(_e=None):
+            """Tab: pull the selected candidate's label into the query."""
+            if matches:
+                q_full = var.get()
+                pre = q_full[:1] if q_full[:1] in _PREFIX else ""
+                var.set(pre + matches[min(sel[0], len(matches) - 1)][1])
+                entry.icursor("end")
+            return "break"
+        entry.bind("<Tab>", _complete)
+        for _n in range(1, 10):
+            entry.bind(f"<Alt-Key-{_n}>", lambda e, n2=_n: _run_nth(n2 - 1))
         lst.bind("<Button-1>",  _click)
 
         # close when focus leaves the palette (click elsewhere / Alt-Tab)
@@ -9076,13 +9837,16 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             paths = [event.data]
         self._handle_dropped_paths(paths)
 
-    def _handle_dropped_paths(self, paths: list):
-        """Register Explorer-dropped files/folders into the active folder tab."""
-        if self._active < 0:
-            self._pathbar_var.set(
-                "Drop ignored — switch to a folder tab to register items")
-            return
-        folders = self._current["folders"]
+    def _handle_dropped_paths(self, paths: list, cat_index: int | None = None):
+        """Register Explorer-dropped files/folders into a folder tab
+        (default: the active tab; pass cat_index to force one)."""
+        if cat_index is None:
+            if self._active < 0:
+                self._pathbar_var.set(
+                    "Drop ignored — switch to a folder tab to register items")
+                return
+            cat_index = self._active
+        folders = self._data[cat_index]["folders"]
         existing = {e.get("path") for e in folders}
         added = 0
         for p in paths:
@@ -9907,7 +10671,14 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
     def _remove_notify_item(self, idx: int):
         title = self._notify_items[idx].get("title", "")
         if messagebox.askyesno("Remove", f"Remove \"{title}\"?", parent=self):
-            self._notify_items.pop(idx)
+            item = self._notify_items.pop(idx)
+
+            def _restore(i=idx, it=item):
+                self._notify_items.insert(min(i, len(self._notify_items)), it)
+                self._save_notify()
+                self._render_list()
+                self._update_banner()
+            self._register_undo(_restore)
             self._save_notify()
             self._render_list()
             self._update_banner()
@@ -9937,6 +10708,29 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         _setup_taskbar_icon(self, palette, shape)
         # update the tray icon image if currently minimized to tray
         self._update_tray_badge()
+
+    def _apply_win11_frame(self):
+        """Win11 polish: rounded window corners + theme-colored title bar
+        via DWM. Silently a no-op on older Windows."""
+        try:
+            hwnd = ctypes.windll.user32.GetAncestor(self.winfo_id(), 2)  # GA_ROOT
+            dwm = ctypes.windll.dwmapi
+
+            def _cref(hex_c: str) -> int:
+                c = hex_c.lstrip("#")
+                return (int(c[4:6], 16) << 16 | int(c[2:4], 16) << 8
+                        | int(c[0:2], 16))
+
+            dwm.DwmSetWindowAttribute(          # WINDOW_CORNER_PREFERENCE
+                hwnd, 33, ctypes.byref(ctypes.c_int(2)), 4)     # = ROUND
+            dwm.DwmSetWindowAttribute(          # CAPTION_COLOR
+                hwnd, 35,
+                ctypes.byref(ctypes.c_int(_cref(C["accent_dk"]))), 4)
+            dwm.DwmSetWindowAttribute(          # CAPTION TEXT_COLOR
+                hwnd, 36,
+                ctypes.byref(ctypes.c_int(_cref(_ink_on(C["accent_dk"])))), 4)
+        except Exception:
+            pass
 
     def _apply_theme(self, theme_name: str):
         if theme_name not in THEMES:
@@ -9968,6 +10762,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             self._render_tabs()
             self._update_footer()   # footer buttons depend on the active tab
             self._render_list()
+            self._apply_win11_frame()   # caption color follows the theme
             _apply_titlebar_theme(self)
         self._fade_transition(_do_rebuild)
 
@@ -10142,12 +10937,16 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
         return animated
 
     def _update_banner(self):
-        """Display the next notification in the banner label."""
+        """Show unread (missed) count + the next notification in the banner."""
         if not hasattr(self, "_banner_lbl"):
             return
         if not self._banner_enabled.get():
             self._banner_lbl.configure(text="")
             return
+        parts = []
+        missed = getattr(self, "_missed_notifies", [])
+        if missed:
+            parts.append(f"{len(missed)} missed - click")
         now = datetime.datetime.now()
         upcoming = []
         for item in self._notify_items:
@@ -10157,23 +10956,38 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                     upcoming.append((sched, item))
             except ValueError:
                 pass
-        if not upcoming:
-            self._banner_lbl.configure(text="")
-            return
-        upcoming.sort(key=lambda x: x[0])
-        sched, item = upcoming[0]
-        delta_s = int((sched - now).total_seconds())
-        if delta_s < 60:
-            remaining = f"{delta_s}s"
-        elif delta_s < 3600:
-            remaining = f"{delta_s // 60}m"
-        elif delta_s < 86400:
-            remaining = f"{delta_s // 3600}h"
+        if upcoming:
+            upcoming.sort(key=lambda x: x[0])
+            sched, item = upcoming[0]
+            delta_s = int((sched - now).total_seconds())
+            if delta_s < 60:
+                remaining = f"{delta_s}s"
+            elif delta_s < 3600:
+                remaining = f"{delta_s // 60}m"
+            elif delta_s < 86400:
+                remaining = f"{delta_s // 3600}h"
+            else:
+                remaining = f"{delta_s // 86400}d"
+            parts.append(f"{item.get('title', '')}  "
+                         f"{sched.strftime('%H:%M')}  ({remaining})")
+        self._banner_lbl.configure(
+            text=f"  {'  |  '.join(parts)}  " if parts else "")
+
+    def _banner_click(self, _e=None):
+        """Replay missed notification popups, or jump to the Notify tab."""
+        missed, self._missed_notifies = self._missed_notifies, []
+        if missed:
+            for t in missed:
+                NotificationPopup(self, t, self._notify_display_sec.get() * 1000,
+                                  on_missed=self._on_popup_missed)
+            self._update_banner()
         else:
-            remaining = f"{delta_s // 86400}d"
-        title    = item.get("title", "")
-        time_str = sched.strftime("%H:%M")
-        self._banner_lbl.configure(text=f"  {title}  {time_str}  ({remaining})  ")
+            self._switch_tab(-3)
+
+    def _on_popup_missed(self, task: dict):
+        """A scheduled popup timed out with no interaction: keep it as unread."""
+        self._missed_notifies.append(task)
+        self._update_banner()
 
     def _open_recording(self):
         RecordingWindow(self)
@@ -10226,7 +11040,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
             key = f"{item.get('title', '')}|{sched_str}"
             if notify_at <= now < sched and key not in self._notified:
                 self._notified.add(key)
-                NotificationPopup(self, item, self._notify_display_sec.get() * 1000)
+                NotificationPopup(self, item, self._notify_display_sec.get() * 1000,
+                                  on_missed=self._on_popup_missed)
                 if not self._is_visible():
                     self._tray_notify_pending = True
                     self._update_tray_badge()
