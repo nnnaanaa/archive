@@ -1,8 +1,12 @@
 import os
 import shutil
+from datetime import datetime
 
 # 読み込むテキストファイルのパス
 TEXT_FILE_PATH = "folder_list.txt"
+
+# 削除したフォルダを退避させておくバックアップ先
+BACKUP_ROOT = "backup"
 
 
 def process_folders(file_path):
@@ -22,19 +26,23 @@ def process_folders(file_path):
         print(f"--- [{index}/{total_folders}] 処理開始 ---")
         print(f"対象フォルダ: {folder_path}")
 
-        # 1. 存在する場合に削除
+        # 1. 存在する場合にバックアップへ退避（完全削除はしない）
         if os.path.exists(folder_path):
+            timestamp = datetime.now().strftime("%Y%m%d%H%M%S")
+            folder_name = os.path.basename(os.path.normpath(folder_path))
+            backup_path = os.path.join(BACKUP_ROOT, f"{folder_name}_{timestamp}")
             try:
-                shutil.rmtree(folder_path)
-                print(f"状態: 既存のフォルダを削除しました。")
+                os.makedirs(BACKUP_ROOT, exist_ok=True)
+                shutil.move(folder_path, backup_path)
+                print(f"状態: 既存のフォルダをバックアップへ退避しました。（{backup_path}）")
             except Exception as e:
-                print(f"エラー: フォルダの削除に失敗しました。: {e}")
+                print(f"エラー: フォルダの退避に失敗しました。: {e}")
                 print("このフォルダの処理をスキップします。\n")
                 continue
         else:
-            print(f"状態: フォルダは存在しませんでした（削除スキップ）。")
+            print(f"状態: フォルダは存在しませんでした（退避スキップ）。")
 
-        # ★ 応答待ち①（削除後・再作成前）
+        # ★ 応答待ち①（退避後・再作成前）
         input(
             ">> ［Enter］キーを押すと、フォルダを【再作成】します..."
         )
