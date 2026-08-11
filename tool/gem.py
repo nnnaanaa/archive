@@ -200,6 +200,14 @@ THEMES: dict[str, dict] = {
         "tab_act": "#2F251E", "tab_inact": "#281F18",
         "btn_del": "#8B4A3A", "btn_del_h": "#B05E48",
     },
+    "arcana": {   # Arcana Shadow: charcoal-violet outfit dominant, golden-blonde hair,
+                  # pale yellow-green trim, rod's crimson bow accent
+        "bg": "#2C2838", "card": "#363047", "card_h": "#443C58",
+        "accent": "#9B7FDE", "accent_dk": "#6E52A8", "accent_lt": "#F0D078",
+        "text": "#F5DC94", "text_sub": "#C8C08A", "border": "#8C8858",
+        "tab_act": "#363047", "tab_inact": "#242030",
+        "btn_del": "#D8303F", "btn_del_h": "#A82030",
+    },
 }
 
 ICON_PALETTES: dict[str, dict] = {
@@ -322,6 +330,12 @@ ICON_PALETTES: dict[str, dict] = {
         "LT":  (215, 170, 125, 255), "F":  (192, 138,  90, 255),
         "MD":  (154, 106,  62, 255), "DK": ( 95,  60,  30, 255),
         "SP":  (238, 210, 175, 205),
+    },
+    "arcana": {
+        "BDR": ( 30,  26,  42, 255), "HL": (240, 220, 150, 255),
+        "LT":  (198, 168, 228, 255), "F":  (155, 127, 222, 255),
+        "MD":  (110,  82, 168, 255), "DK": ( 66,  48, 108, 255),
+        "SP":  (245, 220, 160, 215),
     },
 }
 
@@ -584,6 +598,9 @@ class _PillBtn(tk.Canvas):
         elif self._kind == "soft":
             base, hov = C["accent_lt"], C["border"]
             fg,   fg_h = _ink_on(C["accent_lt"]), _ink_on(C["border"])
+        elif self._kind == "danger":
+            base, hov = C["btn_del"], C["btn_del_h"]
+            fg,   fg_h = "white", "white"
         else:   # primary
             base, hov, fg, fg_h = C["accent"], C["accent_dk"], "white", "white"
         return (hov, fg_h) if self._hover else (base, fg)
@@ -4707,7 +4724,7 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                                 ("peach","Peach"),("sky","Sky"),("lemon","Lemon"),
                                 ("lavender","Lavender"),("sakura","Sakura"),("yumekawa","Yumekawa"),
                                 ("cyber","Cyber"),("synthwave","Synthwave"),("matrix","Matrix"),
-                                ("coffee","Coffee")]:
+                                ("coffee","Coffee"),("arcana","Arcana Shadow")]:
                 prefix = "* " if self._theme == key else "  "
                 theme_sub.add_command(label=prefix + label,
                                       command=lambda k=key: self._apply_theme(k))
@@ -4906,7 +4923,8 @@ class FolderLauncher(TkinterDnD.Tk if TkinterDnD is not None else tk.Tk):
                          _cfg_btn.winfo_rooty() + _cfg_btn.winfo_height())
 
         _cfg_btn = _PillBtn(hdr, text="...", command=_show_settings,
-                            kind="header", font=FONT_SMALL, padx=10, pady=4,
+                            kind="danger" if self._theme == "arcana" else "header",
+                            font=FONT_SMALL, padx=10, pady=4,
                             bg=C["accent"], fixed=True)
         _cfg_btn.pack(side="right", padx=(0, 6))
 
