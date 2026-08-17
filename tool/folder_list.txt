@@ -1,2 +1,0 @@
-P:\python\tool\data\data1
-P:\python\tool\data\data2
